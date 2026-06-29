@@ -2460,9 +2460,9 @@ local function CreateMinimapButton()
   b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
   b:RegisterForDrag("LeftButton")
   local icon = b:CreateTexture(nil, "BACKGROUND")
-  icon:SetWidth(18); icon:SetHeight(18); icon:SetPoint("CENTER", b, "CENTER", 0, 1)
-  icon:SetTexture("Interface\\Icons\\Spell_Holy_ElunesGrace")   -- crescent moon (Elune)
-  icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)                  -- trim the icon border so it sits inside the ring
+  icon:SetWidth(22); icon:SetHeight(22); icon:SetPoint("CENTER", b, "CENTER", 0, 1)
+  icon:SetTexture("Interface\\AddOns\\Guided\\img\\moonowl")   -- custom owl-and-moon art
+  icon:SetTexCoord(0, 1, 0, 1)                                 -- full-bleed (art has its own transparent margin)
   local ring = b:CreateTexture(nil, "OVERLAY")
   ring:SetWidth(53); ring:SetHeight(53); ring:SetPoint("TOPLEFT", b, "TOPLEFT", 0, 0)
   ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")

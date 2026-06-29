@@ -2891,7 +2891,7 @@ end)
 -- tracker would wrongly mark it done. Hook the abandon flow to forget the quest
 -- (clear it from seen + doneQuests) and route back to the step that accepts it.
 local origAbandonQuest = AbandonQuest
-function AbandonQuest(...)
+function AbandonQuest()
   local nm = GetAbandonQuestName and GetAbandonQuestName()
   if nm and nm ~= "" and Guided.active then
     local key = lc(nm)
@@ -2911,7 +2911,7 @@ function AbandonQuest(...)
       end
     end
   end
-  return origAbandonQuest(...)   -- QUEST_LOG_UPDATE then re-runs SkipForward with the quest gone
+  if origAbandonQuest then origAbandonQuest() end   -- QUEST_LOG_UPDATE then re-runs SkipForward with the quest gone
 end
 
 -- ----------------------------------------------------------------- slash ----

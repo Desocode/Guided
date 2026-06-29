@@ -1270,6 +1270,14 @@ local function GetRow(i)
   return r
 end
 
+local function GetStepRow(k)
+  RXP12.stepRows = RXP12.stepRows or {}
+  if RXP12.stepRows[k] then return RXP12.stepRows[k] end
+  local r = BuildRow(RXP12StepFrame, "RXP12StepRow"..k)
+  RXP12.stepRows[k] = r
+  return r
+end
+
 -- lay out one step's row; returns its height. mode: current renders the expanded
 -- checkbox card, others render the compact line.
 local function RenderRow(r, step, i, cur, expand)
@@ -1495,16 +1503,30 @@ function RXP12.UpdateUI()
   local idx = n + 1
   while RXP12.rows[idx] do RXP12.rows[idx]:Hide(); idx = idx + 1 end
 
-  -- current step shown in full detail in the linked top frame
+  -- active steps (pinned stickies + current), stacked in the linked top frame
   if RXP12StepFrame then
-    local cs = RXP12.active[cur]
-    if cs then
-      local sh = RenderRow(RXP12.stepRow, cs, cur, cur, true)
-      RXP12.stepRow:ClearAllPoints()
-      RXP12.stepRow:SetPoint("TOPLEFT", RXP12StepFrame, "TOPLEFT", 6, -28)
-      RXP12.stepRow:Show()
+    local order = {}
+    if RXP12.activeStickies then for idx in pairs(RXP12.activeStickies) do tinsert(order, idx) end end
+    local hasCur = false
+    for j = 1, table.getn(order) do if order[j] == cur then hasCur = true end end
+    if RXP12.active[cur] and not hasCur then tinsert(order, cur) end
+    table.sort(order)                                  -- stickies (earlier) above, current below
+    local sy, k = 28, 0
+    for oi = 1, table.getn(order) do
+      local st = RXP12.active[order[oi]]
+      if st then
+        k = k + 1
+        local sr = GetStepRow(k)
+        local sh = RenderRow(sr, st, order[oi], cur, true)
+        sr:ClearAllPoints(); sr:SetPoint("TOPLEFT", RXP12StepFrame, "TOPLEFT", 6, -sy)
+        sr:Show()
+        sy = sy + sh + 4
+      end
+    end
+    if RXP12.stepRows then local j = k + 1; while RXP12.stepRows[j] do RXP12.stepRows[j]:Hide(); j = j + 1 end end
+    if k > 0 then
       getglobal("RXP12StepHeader"):SetText("Step "..cur.." of "..n)
-      RXP12StepFrame:SetHeight(sh + 36)
+      RXP12StepFrame:SetHeight(sy + 6)
       RXP12StepFrame:SetBackdropColor(0.05, 0.05, 0.07, RXP12_Save.opacity or 0.92)
       RXP12StepFrame:Show()
     else
@@ -1782,8 +1804,6 @@ local function CreateUI()
   local shdr = sfr:CreateFontString("RXP12StepHeader", "OVERLAY", "GameFontNormal")
   shdr:SetPoint("TOPLEFT", sfr, "TOPLEFT", 12, -9)
   shdr:SetText("Current Step")
-  RXP12.stepRow = BuildRow(sfr, "RXP12StepRow")
-  RXP12.stepRow:SetPoint("TOPLEFT", sfr, "TOPLEFT", 6, -28)
   sfr:Hide()
 
   local close = CreateFrame("Button", "RXP12FrameClose", f, "UIPanelCloseButton")

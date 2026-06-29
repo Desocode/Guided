@@ -128,6 +128,7 @@ function RXP12.BuildActive()
   RXP12.activeStickies = {}  -- index -> true: sticky steps pinned & not yet done
   local g = RXP12.CurrentGuide()
   if not g then return end
+  RXP12.EnsureParsed(g)
   for i = 1, table.getn(g.steps) do
     if RXP12.EvalCondition(g.steps[i].cond) then
       tinsert(RXP12.active, g.steps[i])
@@ -238,13 +239,26 @@ function RXP12.ParseLine(step, t)
 end
 
 -- parse a full RXP-format guide string into { name, steps = { ... } }
-function RXP12.Parse(text)
+-- detect a guide's faction from its group/name/defaultfor text. Era.lua bundles
+-- both factions with no per-file guard, so this keeps the cog menu + auto-detect
+-- to the player's faction. nil = neutral (shown to both, e.g. dungeon/T0.5 sets).
+local function GuideFaction(g)
+  local txt = string.lower((g.group or "").." "..(g.name or "").." "..(g.defaultfor or ""))
+  local a = string.find(txt, "alliance", 1, true) or string.find(txt, "(a)", 1, true)
+  local h = string.find(txt, "horde", 1, true) or string.find(txt, "(h)", 1, true)
+  if a and not h then return "alliance" end
+  if h and not a then return "horde" end
+  return nil
+end
+
+function RXP12.Parse(text, headerOnly)
   local guide = { name = "Unnamed", steps = {} }
   local step = nil
   for line in string.gfind(text, "[^\r\n]+") do
     local t = trim(line)
     if t ~= "" then
       if string.find(t, "^step") then
+        if headerOnly then break end
         step = { text = {}, gotos = {}, quests = {}, elements = {}, level = nil, cond = nil }
         local _, _, cond = string.find(t, "^step%s*<<%s*(.*)")
         if cond and cond ~= "" then step.cond = cond end
@@ -258,7 +272,11 @@ function RXP12.Parse(text)
           local _, _, lo, hi = string.find(guide.name, "(%d+)%s*%-%s*(%d+)")
           if lo then guide.lo = tonumber(lo); guide.hi = tonumber(hi) end
         elseif key == "defaultfor" then guide.defaultfor = trim(val)   -- race/class this guide starts
-        elseif key == "group" then guide.group = trim(val)             -- category (Leveling/Endgame/...)
+        elseif key == "group" then                                    -- category (Leveling/Endgame/...)
+          local gv = trim(val)
+          local gp = string.find(gv, "<<", 1, true)
+          if gp then gv = trim(string.sub(gv, 1, gp - 1)) end
+          guide.group = gv
         elseif key == "subgroup" then                                  -- subcategory within the group
           local v = trim(val)
           local _, _, nm, cond = string.find(v, "^(.-)%s*<<%s*(.*)$")
@@ -276,13 +294,25 @@ function RXP12.Parse(text)
       end
     end
   end
+  guide.faction = GuideFaction(guide)
   return guide
+end
+
+-- lazily full-parse a guide's steps the first time it's selected, so we can
+-- register hundreds of guides (Era.lua) cheaply at load with only their headers.
+function RXP12.EnsureParsed(g)
+  if not g or g.parsed then return end
+  g.parsed = true
+  if not g.raw then g.steps = g.steps or {}; return end
+  local ok, full = pcall(RXP12.Parse, g.raw)
+  g.steps = (ok and full and full.steps) or {}
 end
 
 function RXP12.RegisterGuide(text)
   if type(text) ~= "string" then return end
-  local ok, guide = pcall(RXP12.Parse, text)
+  local ok, guide = pcall(RXP12.Parse, text, true)   -- header only; steps parsed on demand
   if not ok or not guide then return end
+  guide.raw = text
   if not RXP12.guides[guide.name] then tinsert(RXP12.guideOrder, guide.name) end
   RXP12.guides[guide.name] = guide
 end
@@ -808,7 +838,7 @@ local function GetElemRow(r, j)
   er._onclick = function() er.check:SetChecked(not er.check:GetChecked()); toggle() end
   er.check:SetScript("OnClick", toggle)
   er:SetScript("OnClick", er._onclick)
-  er:SetScript("OnMouseUp", function() if arg1 == "RightButton" then RXP12.ToggleMenu() end end)
+  er:SetScript("OnMouseUp", function() if arg1 == "RightButton" then RXP12.OpenMenu(er:GetParent().stepIndex, "cursor") end end)
   er:SetScript("OnEnter", function()
     if er.tip then GameTooltip:SetOwner(er, "ANCHOR_RIGHT"); GameTooltip:SetText(er.tip, 1, 1, 1, 1, 1); GameTooltip:Show() end
   end)
@@ -859,9 +889,9 @@ local function GetRow(i)
   r.bar:Hide()
   r:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
   local hl = r:GetHighlightTexture(); if hl then hl:SetVertexColor(1, 1, 1, 0.08) end
-  -- left-click does nothing (avoids accidental jumps); RIGHT-click jumps to the step
+  -- left-click does nothing; RIGHT-click opens the menu (with a "Go to step" option)
   r:SetScript("OnMouseUp", function()
-    if arg1 == "RightButton" and this.stepIndex then RXP12.SetStep(this.stepIndex) end
+    if arg1 == "RightButton" then RXP12.OpenMenu(this.stepIndex, "cursor") end
   end)
   r:SetScript("OnEnter", function()
     if this.tip then GameTooltip:SetOwner(this, "ANCHOR_RIGHT"); GameTooltip:SetText(this.tip, 1, 1, 1, 1, 1); GameTooltip:Show() end
@@ -1113,11 +1143,19 @@ function RXP12.GuideSubgroup(g)
   return nil
 end
 
+-- a guide is visible if it has no faction or matches the player's
+function RXP12.GuideVisible(g)
+  return g and (not g.faction or g.faction == RXP12.me.faction)
+end
+
 function RXP12.MenuGroups()
   local seen, order = {}, {}
   for i = 1, table.getn(RXP12.guideOrder) do
-    local grp = (RXP12.guides[RXP12.guideOrder[i]].group) or "Other"
-    if not seen[grp] then seen[grp] = true; tinsert(order, grp) end
+    local g = RXP12.guides[RXP12.guideOrder[i]]
+    if RXP12.GuideVisible(g) then
+      local grp = g.group or "Other"
+      if not seen[grp] then seen[grp] = true; tinsert(order, grp) end
+    end
   end
   return order
 end
@@ -1127,7 +1165,7 @@ function RXP12.SubgroupsInGroup(grp)
   local seen, order = {}, {}
   for i = 1, table.getn(RXP12.guideOrder) do
     local g = RXP12.guides[RXP12.guideOrder[i]]
-    local sub = RXP12.GuideSubgroup(g)
+    local sub = RXP12.GuideVisible(g) and RXP12.GuideSubgroup(g)
     if ((g.group) or "Other") == grp and sub and not seen[sub] then
       seen[sub] = true; tinsert(order, sub)
     end
@@ -1142,7 +1180,7 @@ function RXP12.GuidesInGroup(grp, sub)
   for i = 1, table.getn(RXP12.guideOrder) do
     local gname = RXP12.guideOrder[i]
     local g = RXP12.guides[gname]
-    if ((g.group) or "Other") == grp then
+    if RXP12.GuideVisible(g) and ((g.group) or "Other") == grp then
       local gsub = RXP12.GuideSubgroup(g)
       if sub == nil or (sub == false and not gsub) or (sub and gsub == sub) then
         tinsert(out, gname)
@@ -1157,6 +1195,12 @@ function RXP12.MenuInit()
   local level = UIDROPDOWNMENU_MENU_LEVEL or 1
   local info
   if level == 1 then
+    if RXP12.menuStep then
+      local target = RXP12.menuStep
+      info = {}; info.text = "Go to step "..target; info.notCheckable = 1
+      info.func = function() RXP12.SetStep(target); CloseDropDownMenus() end
+      UIDropDownMenu_AddButton(info, 1)
+    end
     info = {}; info.text = "RXP12"; info.isTitle = 1; info.notCheckable = 1
     UIDropDownMenu_AddButton(info, 1)
 
@@ -1219,9 +1263,16 @@ function RXP12.MenuInit()
   end
 end
 
-function RXP12.ToggleMenu()
+-- open the cog dropdown. A stepIndex (from a right-clicked row) adds a
+-- "Go to step N" entry at the top, alongside the Options/Guides menu.
+function RXP12.OpenMenu(stepIndex, anchor)
   if not RXP12Menu then return end
-  ToggleDropDownMenu(1, nil, RXP12Menu, "RXP12FrameCog", 0, 0)
+  RXP12.menuStep = stepIndex
+  ToggleDropDownMenu(1, nil, RXP12Menu, anchor or "cursor", 0, 0)
+end
+
+function RXP12.ToggleMenu()
+  RXP12.OpenMenu(nil, "RXP12FrameCog")
 end
 
 local function CreateUI()
@@ -1241,14 +1292,14 @@ local function CreateUI()
     edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
     tile = true, tileSize = 16, edgeSize = 16,
     insets = { left = 4, right = 4, top = 4, bottom = 4 } })
-  f:SetBackdropColor(0.05, 0.05, 0.07, 0.92)
+  f:SetBackdropColor(0.05, 0.05, 0.07, RXP12_Save.opacity or 0.92)
   f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
   f:SetScript("OnDragStart", function() if not RXP12_Save.locked then this:StartMoving() end end)
   f:SetScript("OnDragStop", function()
     this:StopMovingOrSizing()
     RXP12_Save.pos = { x = this:GetLeft(), y = this:GetTop() }
   end)
-  f:SetScript("OnMouseUp", function() if arg1 == "RightButton" then RXP12.ToggleMenu() end end)
+  f:SetScript("OnMouseUp", function() if arg1 == "RightButton" then RXP12.OpenMenu(nil, "cursor") end end)
 
   -- header: cog menu + class icon + guide name + counter, with a divider line
   local cog = CreateFrame("Button", "RXP12FrameCog", f)
@@ -1287,24 +1338,12 @@ local function CreateUI()
   -- scrolling step list
   local sf = CreateFrame("ScrollFrame", "RXP12ScrollFrame", f)
   sf:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -34)
-  sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 34)
+  sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 10)
   local cchild = CreateFrame("Frame", "RXP12ScrollChild", sf)
   cchild:SetWidth(ROW_WIDTH); cchild:SetHeight(1)
   sf:SetScrollChild(cchild)
   sf:EnableMouseWheel(true)
   sf:SetScript("OnMouseWheel", function() RXP12.WheelScroll(arg1) end)
-
-  local prev = CreateFrame("Button", "RXP12FramePrev", f, "UIPanelButtonTemplate")
-  prev:SetWidth(70); prev:SetHeight(20)
-  prev:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 8)
-  prev:SetText("< Prev")
-  prev:SetScript("OnClick", function() RXP12.Back() end)
-
-  local next = CreateFrame("Button", "RXP12FrameNext", f, "UIPanelButtonTemplate")
-  next:SetWidth(70); next:SetHeight(20)
-  next:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -22, 8)
-  next:SetText("Next >")
-  next:SetScript("OnClick", function() RXP12.Advance() end)
 
   local close = CreateFrame("Button", "RXP12FrameClose", f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
@@ -1341,7 +1380,7 @@ end
 local function CreateOptions()
   if RXP12OptionsFrame then return end
   local f = CreateFrame("Frame", "RXP12OptionsFrame", UIParent)
-  f:SetWidth(290); f:SetHeight(248)
+  f:SetWidth(290); f:SetHeight(300)
   f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
   f:SetBackdrop({
     bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -1386,6 +1425,21 @@ local function CreateOptions()
     if RXP12Frame then RXP12Frame:SetScale(v) end
   end)
 
+  local op = CreateFrame("Slider", "RXP12OptOpacity", f, "OptionsSliderTemplate")
+  op:SetWidth(220); op:SetHeight(16)
+  op:SetPoint("TOP", f, "TOP", 0, -196)
+  op:SetMinMaxValues(0, 1)
+  op:SetValueStep(0.05)
+  getglobal("RXP12OptOpacityLow"):SetText("0")
+  getglobal("RXP12OptOpacityHigh"):SetText("1")
+  getglobal("RXP12OptOpacityText"):SetText("Background opacity")
+  op:SetValue(RXP12_Save.opacity or 0.92)
+  op:SetScript("OnValueChanged", function()
+    local v = this:GetValue()
+    RXP12_Save.opacity = v
+    if RXP12Frame then RXP12Frame:SetBackdropColor(0.05, 0.05, 0.07, v) end
+  end)
+
   local rst = CreateFrame("Button", "RXP12OptReset", f, "UIPanelButtonTemplate")
   rst:SetWidth(130); rst:SetHeight(22)
   rst:SetPoint("BOTTOM", f, "BOTTOM", 0, 14)
@@ -1411,6 +1465,7 @@ function RXP12.ToggleOptions()
     if RXP12OptArrow then RXP12OptArrow:SetChecked(RXP12_Save.arrow and true or false) end
     if RXP12OptLock then RXP12OptLock:SetChecked(RXP12_Save.locked and true or false) end
     if RXP12OptScale then RXP12OptScale:SetValue(RXP12_Save.scale or 1) end
+    if RXP12OptOpacity then RXP12OptOpacity:SetValue(RXP12_Save.opacity or 0.92) end
     RXP12OptionsFrame:Show()
   end
 end
@@ -1430,6 +1485,7 @@ local function Defaults()
   if RXP12_Save.arrow == nil then RXP12_Save.arrow = true end
   if RXP12_Save.locked == nil then RXP12_Save.locked = false end
   if RXP12_Save.scale == nil then RXP12_Save.scale = 1 end
+  if RXP12_Save.opacity == nil then RXP12_Save.opacity = 0.92 end
 end
 
 -- score a guide for "is this the right one to start me on?" given the player level.
@@ -1455,7 +1511,7 @@ function RXP12.AutoSelectGuide()
     local gname = RXP12.guideOrder[i]
     local g = RXP12.guides[gname]
     -- eligible if it has no #defaultfor, or its #defaultfor matches this character
-    if g and (not g.defaultfor or RXP12.EvalCondition(g.defaultfor)) then
+    if RXP12.GuideVisible(g) and (not g.defaultfor or RXP12.EvalCondition(g.defaultfor)) then
       local score = GuideScore(g, lvl)
       if not bestScore or score > bestScore then best = gname; bestScore = score end
     end

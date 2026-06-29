@@ -794,7 +794,7 @@ end
 -- live objective progress and a progress bar; other steps are compact one-liners.
 RXP12.rows = RXP12.rows or {}
 RXP12.rowY = RXP12.rowY or {}
-local ROW_WIDTH = 312
+local ROW_WIDTH = 316
 local GUTTER = 26                       -- left column for the step-number badge
 local CONTENT_X = GUTTER + 4
 local CONTENT_W = ROW_WIDTH - CONTENT_X - 6
@@ -1184,13 +1184,6 @@ function RXP12.UpdateUI()
   end
 
   -- follow the (resizable) frame width so rows fill the scroll area
-  -- size rows from the frame's EXPLICIT width (reliable; the scroll-frame's
-  -- anchor-derived width can read 0 before a layout pass). 24 = 12px inset each side.
-  if RXP12Frame then
-    local w = (RXP12Frame:GetWidth() or 340) - 24
-    if w > 80 then ROW_WIDTH = math.floor(w); CONTENT_W = ROW_WIDTH - CONTENT_X - 6 end
-  end
-  if RXP12ScrollChild then RXP12ScrollChild:SetWidth(ROW_WIDTH) end
   RXP12.rowY = {}
   local y = 0
   for i = 1, n do
@@ -1390,11 +1383,7 @@ end
 local function CreateUI()
   if RXP12Frame then return end
   local f = CreateFrame("Frame", "RXP12Frame", UIParent)
-  local W = RXP12_Save.w or 340
-  f:SetWidth(W); f:SetHeight(RXP12_Save.h or 340)   -- width locked (keeps saved width), height resizable
-  f:SetResizable(true)
-  if f.SetMinResize then f:SetMinResize(W, 170) end
-  if f.SetMaxResize then f:SetMaxResize(W, 900) end
+  f:SetWidth(340); f:SetHeight(340)   -- fixed panel
   if RXP12_Save.pos then
     f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", RXP12_Save.pos.x, RXP12_Save.pos.y)
   else
@@ -1451,7 +1440,7 @@ local function CreateUI()
   -- scrolling step list
   local sf = CreateFrame("ScrollFrame", "RXP12ScrollFrame", f)
   sf:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -34)
-  sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 16)
+  sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 12)
   local cchild = CreateFrame("Frame", "RXP12ScrollChild", sf)
   cchild:SetWidth(ROW_WIDTH); cchild:SetHeight(1)
   sf:SetScrollChild(cchild)
@@ -1462,25 +1451,6 @@ local function CreateUI()
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
   close:SetScript("OnClick", function() RXP12.Hide() end)
 
-  -- vertical resize handle: drag the bottom edge up/down (width is fixed)
-  local grip = CreateFrame("Button", "RXP12FrameGrip", f)
-  grip:SetWidth(48); grip:SetHeight(9)
-  grip:SetPoint("BOTTOM", f, "BOTTOM", 0, 4)
-  grip.tex = grip:CreateTexture(nil, "OVERLAY")
-  grip.tex:SetAllPoints(); grip.tex:SetTexture("Interface\\Buttons\\WHITE8X8")
-  grip.tex:SetVertexColor(1, 1, 1, 0.22)
-  grip:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
-  local ghl = grip:GetHighlightTexture(); if ghl then ghl:SetVertexColor(1, 1, 1, 0.18) end
-  grip:SetScript("OnMouseDown", function() if not RXP12_Save.locked then f:StartSizing("BOTTOM") end end)
-  grip:SetScript("OnMouseUp", function()
-    f:StopMovingOrSizing()
-    RXP12_Save.h = f:GetHeight()
-    RXP12.UpdateUI()
-  end)
-  grip:SetScript("OnEnter", function()
-    GameTooltip:SetOwner(this, "ANCHOR_TOP"); GameTooltip:SetText("Drag to resize height", 1, 1, 1); GameTooltip:Show()
-  end)
-  grip:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
   RXP12.UpdateUI()
 end

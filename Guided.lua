@@ -1249,14 +1249,6 @@ function Guided.SkipForward()
   Guided.activeStickies = Guided.activeStickies or {}
   local log = BuildQuestLog()   -- also records "seen" titles
   local n = table.getn(Guided.active)
-  if Guided.dbgWatch and Guided.dbgWatch > 0 then            -- DEBUG abandon trace
-    Guided.dbgWatch = Guided.dbgWatch - 1
-    local s1 = Guided.active[1]
-    Guided.dbgS1 = (Guided.dbgS1 or "").." |cur="..tostring(Guided_Save.step)
-      .." stored="..tostring(Guided.IsDoneStored(s1))
-      .." isd="..tostring(Guided.IsStepDone(s1, log))
-      .." jaid="..tostring(Guided.justAbandonedId)
-  end
 
   -- unpin any sticky that's done or whose completion window has passed
   for idx in pairs(Guided.activeStickies) do
@@ -3067,14 +3059,11 @@ end)
 -- (clear it from seen + doneQuests) and route back to the step that accepts it.
 local origAbandonQuest = AbandonQuest
 function AbandonQuest()
-  Guided.dbgFired = (Guided.dbgFired or 0) + 1            -- DEBUG: hook ran
   local nm = GetAbandonQuestName and GetAbandonQuestName()
   if (not nm or nm == "") and GetQuestLogSelection and GetQuestLogTitle then
     local sel = GetQuestLogSelection()                 -- fall back to the selected quest
     if sel and sel > 0 then nm = GetQuestLogTitle(sel) end
   end
-  Guided.dbgName = nm or "(none)"                        -- DEBUG: captured name
-  Guided.dbgRoute = "none"                               -- DEBUG: where we routed
   if nm and nm ~= "" and Guided.active then
     local key = lc(nm)
     Guided.seen[key] = nil                                   -- so the vanish isn't a "hand-in"
@@ -3083,17 +3072,21 @@ function AbandonQuest()
         if lc(QuestName(id) or "") == key then Guided_Save.doneQuests[id] = nil end
       end
     end
-    for i = 1, table.getn(Guided.active) do                  -- jump back to where you accept it
+    -- route back to where this quest is accepted. Two quests can share a name (e.g.
+    -- the 456/457 "Balance of Nature" chain), so pick the LATEST accept of that name
+    -- BEFORE the current step -- the one you most recently picked up -- and key the
+    -- transient guard to that same quest id.
+    local origStep = Guided_Save.step or 1
+    local bestI, bestId
+    for i = 1, origStep - 1 do
       local qs = Guided.active[i].quests
       for k = 1, table.getn(qs or {}) do
         if qs[k].action == "accept" and lc(QuestName(qs[k].id) or "") == key then
-          if i < (Guided_Save.step or 1) then Guided_Save.step = i; Guided.dbgRoute = i end
-          Guided.justAbandonedId = qs[k].id        -- guard this accept step against the abandon transient
-          Guided.dbgWatch = 6; Guided.dbgS1 = "route="..i   -- DEBUG abandon trace
-          break
+          bestI = i; bestId = qs[k].id
         end
       end
     end
+    if bestI then Guided_Save.step = bestI; Guided.justAbandonedId = bestId end
   end
   if origAbandonQuest then origAbandonQuest() end   -- QUEST_LOG_UPDATE then re-runs SkipForward with the quest gone
 end

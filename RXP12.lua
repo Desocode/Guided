@@ -2114,13 +2114,23 @@ function RXP12.RefreshDungeonChecks()
   end
 end
 
-local function MakeCheck(parent, name, label, y, getter, setter)
+local function MakeCheck(parent, name, label, y, getter, setter, desc)
   local c = CreateFrame("CheckButton", name, parent, "UICheckButtonTemplate")
   c:SetWidth(26); c:SetHeight(26)
   c:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
   getglobal(name.."Text"):SetText(label)
   c:SetChecked(getter() and true or false)
   c:SetScript("OnClick", function() setter(this:GetChecked() and true or false) end)
+  if desc then
+    c.tiph = label; c.tipd = desc
+    c:SetScript("OnEnter", function()
+      GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+      GameTooltip:SetText(this.tiph, 1, 1, 1)
+      GameTooltip:AddLine(this.tipd, 0.82, 0.82, 0.82, 1)
+      GameTooltip:Show()
+    end)
+    c:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  end
   return c
 end
 
@@ -2168,22 +2178,27 @@ local function CreateOptions()
   local pG, pD, pR, pGu = panel("General"), panel("Display"), panel("Routing"), panel("Guides")
 
   -- ---------- General ----------
-  MakeCheck(pG, "RXP12OptAuto", "Auto-accept & turn in quests", -6,
+  MakeCheck(pG, "RXP12OptAuto", "Quest auto accept/turn in", -6,
     function() return RXP12_Save.auto end,
     function(v) RXP12_Save.auto = v
-      Print("Auto quest pickup/turn-in "..(v and "|cff66cc66ON|r" or "|cffff5555OFF|r")) end)
-  MakeCheck(pG, "RXP12OptMinimap", "Show minimap button", -34,
+      Print("Auto quest pickup/turn-in "..(v and "|cff66cc66ON|r" or "|cffff5555OFF|r")) end,
+    "Automatically accept and hand in the step's quests when you talk to the quest giver.")
+  MakeCheck(pG, "RXP12OptMinimap", "Enable minimap button", -34,
     function() return RXP12_Save.minimap ~= false end,
-    function(v) RXP12_Save.minimap = v; RXP12.UpdateMinimapButton() end)
-  MakeCheck(pG, "RXP12OptArrow", "Show direction arrow", -62,
+    function(v) RXP12_Save.minimap = v; RXP12.UpdateMinimapButton() end,
+    "Add a button on the minimap. Left-click toggles the guide, right-click opens the menu.")
+  MakeCheck(pG, "RXP12OptArrow", "Show waypoint arrow", -62,
     function() return RXP12_Save.arrow end,
-    function(v) RXP12_Save.arrow = v end)
-  MakeCheck(pG, "RXP12OptLock", "Lock guide window", -90,
+    function(v) RXP12_Save.arrow = v end,
+    "Show the on-screen arrow pointing to the current step's location.")
+  MakeCheck(pG, "RXP12OptLock", "Lock frames", -90,
     function() return RXP12_Save.locked end,
-    function(v) RXP12_Save.locked = v end)
-  MakeCheck(pG, "RXP12OptTracker", "Leveling tracker", -118,
+    function(v) RXP12_Save.locked = v end,
+    "Prevent the guide window from being moved or resized.")
+  MakeCheck(pG, "RXP12OptTracker", "Enable leveling tracker", -118,
     function() return RXP12_Save.tracker end,
-    function(v) RXP12_Save.tracker = v; RXP12.ApplyTracker() end)
+    function(v) RXP12_Save.tracker = v; RXP12.ApplyTracker() end,
+    "Show experience per hour, time spent on this level, and estimated time to level.")
 
   -- ---------- Display ----------
   local s = CreateFrame("Slider", "RXP12OptScale", pD, "OptionsSliderTemplate")
@@ -2191,7 +2206,7 @@ local function CreateOptions()
   s:SetMinMaxValues(0.7, 1.5); s:SetValueStep(0.05)
   getglobal("RXP12OptScaleLow"):SetText("0.7")
   getglobal("RXP12OptScaleHigh"):SetText("1.5")
-  getglobal("RXP12OptScaleText"):SetText("Guide window scale")
+  getglobal("RXP12OptScaleText"):SetText("Window scale")
   s:SetValue(RXP12_Save.scale or 1)
   s:SetScript("OnValueChanged", function()
     RXP12_Save.scale = this:GetValue()
@@ -2210,15 +2225,20 @@ local function CreateOptions()
   end)
 
   -- ---------- Routing (dungeons) ----------
+  local rhdr = pR:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  rhdr:SetPoint("TOPLEFT", pR, "TOPLEFT", 2, -2); rhdr:SetText("|cffffd200Dungeons|r")
+  local rhdiv = pR:CreateTexture(nil, "ARTWORK")
+  rhdiv:SetPoint("TOPLEFT", rhdr, "BOTTOMLEFT", 0, -3); rhdiv:SetWidth(414); rhdiv:SetHeight(1)
+  rhdiv:SetTexture(1, 1, 1, 0.12)
   local rh = pR:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  rh:SetPoint("TOPLEFT", pR, "TOPLEFT", 2, -2); rh:SetText("Weave these dungeons into the route:")
+  rh:SetPoint("TOPLEFT", rhdiv, "BOTTOMLEFT", 0, -4); rh:SetText("Weave selected dungeons into your route.")
   for i = 1, table.getn(DUNGEON_ORDER) do
     local code = DUNGEON_ORDER[i]
     local c = CreateFrame("CheckButton", "RXP12DungeonChk"..i, pR, "UICheckButtonTemplate")
     c:SetWidth(22); c:SetHeight(22)
     local col, row = 0, i - 1
     if i > 8 then col = 1; row = i - 9 end
-    c:SetPoint("TOPLEFT", pR, "TOPLEFT", 2 + col * 208, -22 - row * 23)
+    c:SetPoint("TOPLEFT", pR, "TOPLEFT", 2 + col * 208, -52 - row * 23)
     getglobal(c:GetName().."Text"):SetText(DUNGEON_NAMES[code] or code)
     c.code = code
     c:SetChecked(RXP12_Save.dungeons[code] and true or false)

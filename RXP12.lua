@@ -1373,10 +1373,6 @@ local function BuildRow(parent, name)
   r:SetScript("OnMouseUp", function()
     if arg1 == "RightButton" then RXP12.OpenMenu(this.stepIndex, "cursor") end
   end)
-  r:SetScript("OnEnter", function()
-    if this.tip then GameTooltip:SetOwner(this, "ANCHOR_RIGHT"); GameTooltip:SetText(this.tip, 1, 1, 1, 1, 1); GameTooltip:Show() end
-  end)
-  r:SetScript("OnLeave", function() GameTooltip:Hide() end)
   return r
 end
 
@@ -1551,8 +1547,6 @@ local function RenderRow(r, step, i, cur, expand)
     h = FSHeight(r.fs) + 8
   end
 
-  -- tooltip on the whole row = first goto coords / hint
-  r.tip = (step.gotos and step.gotos[1]) and FormatGoto(step.gotos[1]) or "Right-click to jump here"
   if h < 20 then h = 20 end
   r:SetHeight(h); r:SetWidth(ROW_WIDTH)
   return h

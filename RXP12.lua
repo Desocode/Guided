@@ -166,7 +166,15 @@ function RXP12.Parse(text)
       elseif not step then
         -- header directives (before the first step)
         local _, _, key, val = string.find(t, "^#(%S+)%s*(.*)")
-        if key == "name" then guide.name = trim(val) end
+        if key == "name" then
+          guide.name = trim(val)
+          -- a leading "N-M" level range in the name drives auto-detection
+          local _, _, lo, hi = string.find(guide.name, "(%d+)%s*%-%s*(%d+)")
+          if lo then guide.lo = tonumber(lo); guide.hi = tonumber(hi) end
+        elseif key == "defaultfor" then guide.defaultfor = trim(val)   -- race/class this guide starts
+        elseif key == "group" then guide.group = trim(val)
+        elseif key == "next" then guide.nextguide = trim(val)          -- chains to the next guide
+        end
       else
         RXP12.ParseLine(step, t)
       end
@@ -875,10 +883,42 @@ local function Defaults()
   if RXP12_Save.scale == nil then RXP12_Save.scale = 1 end
 end
 
+-- score a guide for "is this the right one to start me on?" given the player level.
+-- Higher = better. In-range beats already-passed beats starts-later.
+local function GuideScore(g, lvl)
+  if g.lo and g.hi and lvl >= g.lo and lvl <= g.hi then
+    return 2000 - (g.hi - g.lo)        -- level is inside its range; tighter range wins
+  elseif g.lo and g.lo <= lvl then
+    return 1000 + g.lo                 -- already past its start; prefer the furthest along
+  elseif g.lo then
+    return 500 - g.lo                  -- starts above you; prefer the soonest
+  end
+  return 0
+end
+
+-- Auto-pick the starting guide from the player's race/class (via each guide's
+-- #defaultfor condition) and level (via the #name "N-M" range). Skips if the
+-- character already has a saved guide. Returns the chosen guide name (or nil).
+function RXP12.AutoSelectGuide()
+  local lvl = UnitLevel("player") or 1
+  local best, bestScore
+  for i = 1, table.getn(RXP12.guideOrder) do
+    local gname = RXP12.guideOrder[i]
+    local g = RXP12.guides[gname]
+    -- eligible if it has no #defaultfor, or its #defaultfor matches this character
+    if g and (not g.defaultfor or RXP12.EvalCondition(g.defaultfor)) then
+      local score = GuideScore(g, lvl)
+      if not bestScore or score > bestScore then best = gname; bestScore = score end
+    end
+  end
+  return best or RXP12.guideOrder[1]
+end
+
 local function SelectDefaultGuide()
   if RXP12_Save.guide and RXP12.guides[RXP12_Save.guide] then return end
-  if RXP12.guideOrder[1] then
-    RXP12_Save.guide = RXP12.guideOrder[1]
+  local best = RXP12.AutoSelectGuide()
+  if best then
+    RXP12_Save.guide = best
     RXP12_Save.step = 1
   end
 end
@@ -912,7 +952,8 @@ local function OnEvent()
     if RXP12_Save.scale and RXP12Frame then RXP12Frame:SetScale(RXP12_Save.scale) end
     if RXP12_Save.shown then RXP12.Show() else RXP12.Hide() end
     RXP12.SkipForward()   -- resume at the first not-yet-completed step
-    Print("loaded. /rxp12 to toggle, /rxp12 options for settings.")
+    Print("loaded. Guide: |cffffd200"..(RXP12_Save.guide or "none")
+      .."|r  (/rxp12 list · /rxp12 detect · /rxp12 options)")
   elseif event == "QUEST_LOG_UPDATE" or event == "UNIT_QUEST_LOG_CHANGED"
       or event == "PLAYER_LEVEL_UP" then
     RXP12.CheckAuto()
@@ -942,6 +983,15 @@ SlashCmdList["RXP12"] = function(msg)
     RXP12_Save.auto = not RXP12_Save.auto
     if RXP12OptAuto then RXP12OptAuto:SetChecked(RXP12_Save.auto and true or false) end
     Print("Auto quest pickup/turn-in "..(RXP12_Save.auto and "|cff66cc66ON|r" or "|cffff5555OFF|r"))
+  elseif cmd == "detect" then
+    local best = RXP12.AutoSelectGuide()
+    if best then
+      RXP12_Save.guide = best; RXP12_Save.step = 1; RXP12.seen = {}; RXP12.activeStickies = {}
+      RXP12.BuildActive(); RXP12.SkipForward(); RXP12.Show()
+      Print("Auto-selected for "..(RXP12.me.race or "?").." "..(RXP12.me.class or "")..": |cffffd200"..best.."|r")
+    else
+      Print("No guide matched your class/race/level.")
+    end
   elseif cmd == "reset" then RXP12.seen = {}; RXP12.activeStickies = {}; RXP12.SetStep(1); Print("Reset to step 1.")
   elseif cmd == "list" then
     Print("Guides ("..table.getn(RXP12.guideOrder).."):")

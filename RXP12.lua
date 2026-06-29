@@ -1387,10 +1387,10 @@ end
 local function CreateUI()
   if RXP12Frame then return end
   local f = CreateFrame("Frame", "RXP12Frame", UIParent)
-  f:SetWidth(RXP12_Save.w or 340); f:SetHeight(RXP12_Save.h or 340)
+  f:SetWidth(340); f:SetHeight(RXP12_Save.h or 340)   -- width fixed; height resizable
   f:SetResizable(true)
-  if f.SetMinResize then f:SetMinResize(260, 170) end
-  if f.SetMaxResize then f:SetMaxResize(640, 900) end
+  if f.SetMinResize then f:SetMinResize(340, 170) end
+  if f.SetMaxResize then f:SetMaxResize(340, 900) end
   if RXP12_Save.pos then
     f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", RXP12_Save.pos.x, RXP12_Save.pos.y)
   else
@@ -1447,7 +1447,7 @@ local function CreateUI()
   -- scrolling step list
   local sf = CreateFrame("ScrollFrame", "RXP12ScrollFrame", f)
   sf:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -34)
-  sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 10)
+  sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 16)
   local cchild = CreateFrame("Frame", "RXP12ScrollChild", sf)
   cchild:SetWidth(ROW_WIDTH); cchild:SetHeight(1)
   sf:SetScrollChild(cchild)
@@ -1458,19 +1458,25 @@ local function CreateUI()
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
   close:SetScript("OnClick", function() RXP12.Hide() end)
 
-  -- resize grip: drag the bottom-right corner (disabled while the window is locked)
+  -- vertical resize handle: drag the bottom edge up/down (width is fixed)
   local grip = CreateFrame("Button", "RXP12FrameGrip", f)
-  grip:SetWidth(16); grip:SetHeight(16)
-  grip:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -4, 5)
-  grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
-  grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-  grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
-  grip:SetScript("OnMouseDown", function() if not RXP12_Save.locked then f:StartSizing("BOTTOMRIGHT") end end)
+  grip:SetWidth(48); grip:SetHeight(9)
+  grip:SetPoint("BOTTOM", f, "BOTTOM", 0, 4)
+  grip.tex = grip:CreateTexture(nil, "OVERLAY")
+  grip.tex:SetAllPoints(); grip.tex:SetTexture("Interface\\Buttons\\WHITE8X8")
+  grip.tex:SetVertexColor(1, 1, 1, 0.22)
+  grip:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
+  local ghl = grip:GetHighlightTexture(); if ghl then ghl:SetVertexColor(1, 1, 1, 0.18) end
+  grip:SetScript("OnMouseDown", function() if not RXP12_Save.locked then f:StartSizing("BOTTOM") end end)
   grip:SetScript("OnMouseUp", function()
     f:StopMovingOrSizing()
-    RXP12_Save.w = f:GetWidth(); RXP12_Save.h = f:GetHeight()
+    RXP12_Save.h = f:GetHeight()
     RXP12.UpdateUI()
   end)
+  grip:SetScript("OnEnter", function()
+    GameTooltip:SetOwner(this, "ANCHOR_TOP"); GameTooltip:SetText("Drag to resize height", 1, 1, 1); GameTooltip:Show()
+  end)
+  grip:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
   RXP12.UpdateUI()
 end

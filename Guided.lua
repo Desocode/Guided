@@ -114,16 +114,16 @@ function Guided.EvalCondition(cond)
   c = trim(c)
   if c == "" then return true end
   for group in string.gfind(c, "%S+") do
-    local anyPos, posMatch, negFail = false, false, false
+    -- a "/" group is an OR over its tokens; "!x" is satisfied when x does NOT match.
+    -- (e.g. "!sod/Warrior" = (not sod) OR Warrior -> true on Era for everyone.)
+    local groupTrue = false
     for tok in string.gfind(group, "[^/]+") do
-      if string.sub(tok, 1, 1) == "!" then
-        if MatchToken(string.sub(tok, 2)) then negFail = true end
-      else
-        anyPos = true
-        if MatchToken(tok) then posMatch = true end
-      end
+      local ok
+      if string.sub(tok, 1, 1) == "!" then ok = not MatchToken(string.sub(tok, 2))
+      else ok = MatchToken(tok) end
+      if ok then groupTrue = true; break end
     end
-    if (anyPos and not posMatch) or negFail then return false end
+    if not groupTrue then return false end       -- groups are AND'd
   end
   return true
 end

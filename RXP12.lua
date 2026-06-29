@@ -122,20 +122,35 @@ end
 local function CondOK(c) return (not c) or RXP12.EvalCondition(c) end
 
 -- build the list of steps that apply to this character (after << filtering)
+-- weave dungeons: a step ".dungeon X" shows only if X is enabled; ".dungeon !X"
+-- / ".dungeonskip X" (the solo-path alternative) is hidden when X is enabled.
+function RXP12.DungeonCheck(step)
+  local en = RXP12_Save.dungeons or {}
+  if step.dungeonskip and en[step.dungeonskip] then return false end
+  if step.dungeon and not en[step.dungeon] then return false end
+  return true
+end
+
 function RXP12.BuildActive()
   RXP12.active = {}
   RXP12.labelIndex = {}      -- step #label -> index in active (for #completewith <label>)
   RXP12.activeStickies = {}  -- index -> true: sticky steps pinned & not yet done
+  RXP12.dungeonCodes = {}    -- distinct dungeon codes present in this guide (for the picker)
   local g = RXP12.CurrentGuide()
   if not g then return end
   RXP12.EnsureParsed(g)
+  local seenD = {}
   for i = 1, table.getn(g.steps) do
-    if RXP12.EvalCondition(g.steps[i].cond) then
-      tinsert(RXP12.active, g.steps[i])
+    local st = g.steps[i]
+    if st.dungeon and not seenD[st.dungeon] then seenD[st.dungeon] = true; tinsert(RXP12.dungeonCodes, st.dungeon) end
+    if st.dungeonskip and not seenD[st.dungeonskip] then seenD[st.dungeonskip] = true; tinsert(RXP12.dungeonCodes, st.dungeonskip) end
+    if RXP12.EvalCondition(st.cond) and RXP12.DungeonCheck(st) then
+      tinsert(RXP12.active, st)
       local s = RXP12.active[table.getn(RXP12.active)]
       if s.label and s.label ~= true then RXP12.labelIndex[s.label] = table.getn(RXP12.active) end
     end
   end
+  table.sort(RXP12.dungeonCodes)
   local n = table.getn(RXP12.active)
   if (RXP12_Save.step or 1) > n then RXP12_Save.step = (n > 0 and n) or 1 end
 end
@@ -218,6 +233,13 @@ function RXP12.ParseLine(step, t)
         lvl = tonumber(lvl)
         if lvl and lvl >= 1 and lvl <= 60 then step.level = step.level or lvl end
         kind = "level"; etext = disp or ("Grind to level "..(lvl or "?"))
+      elseif cmd == "dungeon" or cmd == "dungeonskip" then
+        local _, _, code = string.find(rest, "^(%S+)")
+        if code then
+          if cmd == "dungeonskip" then step.dungeonskip = string.upper(code)
+          elseif string.sub(code, 1, 1) == "!" then step.dungeonskip = string.upper(string.sub(code, 2))
+          else step.dungeon = string.upper(code) end
+        end
       elseif disp then kind = "note"; etext = disp        -- any other command, show its text only
       end
     elseif first == "#" then
@@ -1212,6 +1234,10 @@ function RXP12.MenuInit()
     info.func = function() RXP12.ShowImport(); CloseDropDownMenus() end
     UIDropDownMenu_AddButton(info, 1)
 
+    info = {}; info.text = "Dungeons..."; info.notCheckable = 1
+    info.func = function() RXP12.ShowDungeons(); CloseDropDownMenus() end
+    UIDropDownMenu_AddButton(info, 1)
+
     info = {}; info.text = "Auto-detect my guide"; info.notCheckable = 1
     info.func = function()
       local best = RXP12.AutoSelectGuide()
@@ -1483,6 +1509,82 @@ end
 -- Register pasted guides at runtime (no client restart) via the same path guide
 -- files use. Accepts either raw guide text or one/more RXPGuides.RegisterGuide([[
 -- ... ]]) blocks. Persists the raw text per character so imports survive /reload.
+-- ------------------------------------------------------------- dungeons UI ----
+local DUNGEON_NAMES = {
+  RFC="Ragefire Chasm", WC="Wailing Caverns", DM="The Deadmines", SFK="Shadowfang Keep",
+  BFD="Blackfathom Deeps", STOCKADES="The Stockade", GNOMER="Gnomeregan", SM="Scarlet Monastery",
+  RFK="Razorfen Kraul", RFD="Razorfen Downs", ZF="Zul'Farrak", MARA="Maraudon", ST="Sunken Temple",
+  BRD="Blackrock Depths", ULDA="Uldaman",
+}
+local dungeonChecks = {}
+
+local function CreateDungeons()
+  if RXP12DungeonFrame then return end
+  local f = CreateFrame("Frame", "RXP12DungeonFrame", UIParent)
+  f:SetWidth(230); f:SetHeight(220)
+  f:SetPoint("CENTER", UIParent, "CENTER", 140, 0)
+  f:SetFrameStrata("DIALOG")
+  f:SetBackdrop({
+    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile = true, tileSize = 16, edgeSize = 16,
+    insets = { left = 4, right = 4, top = 4, bottom = 4 } })
+  f:SetBackdropColor(0.05, 0.05, 0.07, 0.95)
+  f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
+  f:SetScript("OnDragStart", function() this:StartMoving() end)
+  f:SetScript("OnDragStop", function() this:StopMovingOrSizing() end)
+  local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  title:SetPoint("TOP", f, "TOP", 0, -10); title:SetText("Select Dungeons")
+  f.empty = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  f.empty:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -34); f.empty:SetWidth(200); f.empty:SetJustifyH("LEFT")
+  f.empty:SetText("No dungeons in this guide."); f.empty:Hide()
+  local none = CreateFrame("Button", "RXP12DungeonNone", f, "UIPanelButtonTemplate")
+  none:SetWidth(70); none:SetHeight(20); none:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 8); none:SetText("None")
+  none:SetScript("OnClick", function()
+    RXP12_Save.dungeons = {}; RXP12.BuildActive(); RXP12.SkipForward(); RXP12.ShowDungeons()
+  end)
+  local all = CreateFrame("Button", "RXP12DungeonAll", f, "UIPanelButtonTemplate")
+  all:SetWidth(70); all:SetHeight(20); all:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 8); all:SetText("All")
+  all:SetScript("OnClick", function()
+    for i = 1, table.getn(RXP12.dungeonCodes or {}) do RXP12_Save.dungeons[RXP12.dungeonCodes[i]] = true end
+    RXP12.BuildActive(); RXP12.SkipForward(); RXP12.ShowDungeons()
+  end)
+  local close = CreateFrame("Button", "RXP12DungeonClose", f, "UIPanelCloseButton")
+  close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2); close:SetScript("OnClick", function() f:Hide() end)
+  f:Hide()
+end
+
+function RXP12.ShowDungeons()
+  CreateDungeons()
+  local f = RXP12DungeonFrame
+  local codes = RXP12.dungeonCodes or {}
+  local n = table.getn(codes)
+  for i = 1, n do
+    local c = dungeonChecks[i]
+    if not c then
+      c = CreateFrame("CheckButton", "RXP12DungeonChk"..i, f, "UICheckButtonTemplate")
+      c:SetWidth(24); c:SetHeight(24)
+      c.label = getglobal(c:GetName().."Text")
+      c:SetScript("OnClick", function()
+        if this.code then
+          RXP12_Save.dungeons[this.code] = this:GetChecked() and true or nil
+          RXP12.BuildActive(); RXP12.SkipForward()
+        end
+      end)
+      dungeonChecks[i] = c
+    end
+    c.code = codes[i]
+    c:ClearAllPoints(); c:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -32 - (i-1)*22)
+    c.label:SetText(DUNGEON_NAMES[codes[i]] or codes[i])
+    c:SetChecked(RXP12_Save.dungeons[codes[i]] and true or false)
+    c:Show()
+  end
+  for i = n + 1, table.getn(dungeonChecks) do dungeonChecks[i]:Hide() end
+  if n == 0 then f.empty:Show() else f.empty:Hide() end
+  f:SetHeight(70 + (n > 0 and n or 1) * 22)
+  f:Show()
+end
+
 function RXP12.ImportGuide(text)
   if not text or trim(text) == "" then return 0 end
   local blocks = {}
@@ -1584,6 +1686,7 @@ local function Defaults()
   if RXP12_Save.locked == nil then RXP12_Save.locked = false end
   if RXP12_Save.scale == nil then RXP12_Save.scale = 1 end
   if RXP12_Save.opacity == nil then RXP12_Save.opacity = 0.92 end
+  if RXP12_Save.dungeons == nil then RXP12_Save.dungeons = {} end
 end
 
 -- score a guide for "is this the right one to start me on?" given the player level.
@@ -1685,6 +1788,7 @@ SlashCmdList["RXP12"] = function(msg)
   if cmd == "next" then RXP12.Advance()
   elseif cmd == "prev" or cmd == "back" then RXP12.Back()
   elseif cmd == "options" or cmd == "config" or cmd == "opt" then RXP12.ToggleOptions()
+  elseif cmd == "dungeons" then RXP12.ShowDungeons()
   elseif cmd == "import" then
     if arg == "clear" then RXP12_Save.imports = {}; Print("Cleared imported guides -- /reload to apply.")
     else RXP12.ShowImport() end

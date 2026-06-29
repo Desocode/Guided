@@ -1184,10 +1184,13 @@ function RXP12.UpdateUI()
   end
 
   -- follow the (resizable) frame width so rows fill the scroll area
-  if RXP12ScrollFrame then
-    local w = RXP12ScrollFrame:GetWidth()
-    if w and w > 80 then ROW_WIDTH = math.floor(w); CONTENT_W = ROW_WIDTH - CONTENT_X - 6 end
+  -- size rows from the frame's EXPLICIT width (reliable; the scroll-frame's
+  -- anchor-derived width can read 0 before a layout pass). 24 = 12px inset each side.
+  if RXP12Frame then
+    local w = (RXP12Frame:GetWidth() or 340) - 24
+    if w > 80 then ROW_WIDTH = math.floor(w); CONTENT_W = ROW_WIDTH - CONTENT_X - 6 end
   end
+  if RXP12ScrollChild then RXP12ScrollChild:SetWidth(ROW_WIDTH) end
   RXP12.rowY = {}
   local y = 0
   for i = 1, n do

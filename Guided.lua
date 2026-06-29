@@ -592,21 +592,24 @@ local function ParseGoto(raw)
   return f[1], nil, tonumber(f[2]), tonumber(f[3])                 -- zoneName,x,y
 end
 
--- World-map pin (self-contained, no Astrolabe/Ace). On the destination zone's own
--- map the goto x,y (0-100) map straight onto WorldMapButton, so no cross-map
--- translation is needed: pin = SetPoint(CENTER -> TOPLEFT, x%*W, -y%*H). When the
--- map shows a different zone/continent the pin hides (full cross-continent
--- placement would need Astrolabe's static zone-size tables; deferred).
-local function EnsureMapPin()
-  if GuidedMapPin then return end
-  if not WorldMapButton then return end
-  local pin = CreateFrame("Frame", "GuidedMapPin", WorldMapButton)
-  pin:SetWidth(18); pin:SetHeight(18)
-  pin:SetFrameLevel(WorldMapButton:GetFrameLevel() + 10)
-  local t = pin:CreateTexture(nil, "OVERLAY")
-  t:SetAllPoints(pin)
-  t:SetTexture("Interface\\GossipFrame\\AvailableQuestIcon")   -- yellow "!" = your destination
-  pin:Hide()
+-- World-map pins (self-contained, no Astrolabe/Ace): a numbered marker for every
+-- active step whose goto is in the zone the map is showing. On the zone's own map
+-- the goto x,y (0-100) map straight onto WorldMapDetailFrame (the actual map image),
+-- so no cross-map translation is needed. Pooled; current step highlighted green.
+-- (Cross-continent placement would need Astrolabe's static zone tables; deferred.)
+local mapPins = {}
+local function GetMapPin(i)
+  if mapPins[i] then return mapPins[i] end
+  local parent = WorldMapDetailFrame or WorldMapButton
+  local f = CreateFrame("Frame", "GuidedMapPin"..i, parent)
+  f:SetFrameStrata("FULLSCREEN_DIALOG")
+  local bg = f:CreateTexture(nil, "BACKGROUND")
+  bg:SetAllPoints(f); f.bg = bg
+  local num = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  num:SetPoint("CENTER", f, "CENTER", 0, 0); num:SetTextColor(1, 1, 1)
+  f.num = num
+  mapPins[i] = f
+  return f
 end
 
 -- localized name of the zone the world map is currently DISPLAYING (nil for the
@@ -619,21 +622,40 @@ local function DisplayedZoneName()
 end
 
 function Guided.UpdateWorldMapPins()
+  for i = 1, table.getn(mapPins) do mapPins[i]:Hide() end
   if not WorldMapFrame or not WorldMapFrame:IsVisible() then return end
-  EnsureMapPin()
-  if not GuidedMapPin then return end
-  GuidedMapPin:Hide()
-  local gs = Guided.ArrowGoto()
-  if not gs then return end
-  local zone, _, tx, ty = ParseGoto(gs)
-  if not zone or not tx or not ty then return end          -- need a named zone + coords
   local shown = DisplayedZoneName()
-  if not shown or normalize(shown) ~= normalize(zone) then return end   -- map must show that zone
-  local w, h = WorldMapButton:GetWidth(), WorldMapButton:GetHeight()
+  if not shown then return end                              -- continent/world view: no pins
+  local snorm = normalize(shown)
+  local parent = WorldMapDetailFrame or WorldMapButton
+  if not parent then return end
+  local w, h = parent:GetWidth(), parent:GetHeight()
   if not w or w == 0 then return end
-  GuidedMapPin:ClearAllPoints()
-  GuidedMapPin:SetPoint("CENTER", WorldMapButton, "TOPLEFT", (tx / 100) * w, -(ty / 100) * h)
-  GuidedMapPin:Show()
+  local cur = Guided_Save.step
+  local active = Guided.active or {}
+  local n = 0
+  for ai = 1, table.getn(active) do
+    local st = active[ai]
+    local gs = st.gotos and st.gotos[1]
+    if gs then
+      local zone, _, tx, ty = ParseGoto(gs)
+      if zone and tx and ty and normalize(zone) == snorm then   -- this step is in the shown zone
+        n = n + 1
+        if n > 80 then break end                            -- bound the pin count
+        local pin = GetMapPin(n)
+        local label = Guided.dispNum and Guided.dispNum[ai]
+        pin.num:SetText(label and tostring(label) or "")    -- main steps numbered; stickies just dotted
+        if ai == cur then
+          pin.bg:SetTexture(0.1, 0.85, 0.1, 0.9); pin:SetWidth(22); pin:SetHeight(22)   -- current = green
+        else
+          pin.bg:SetTexture(0.12, 0.3, 0.75, 0.85); pin:SetWidth(16); pin:SetHeight(16) -- others = blue
+        end
+        pin:ClearAllPoints()
+        pin:SetPoint("CENTER", parent, "TOPLEFT", (tx / 100) * w, -(ty / 100) * h)
+        pin:Show()
+      end
+    end
+  end
 end
 
 -- called from UpdateUI on every step change; also driven by WORLD_MAP_UPDATE

@@ -1408,7 +1408,7 @@ local function RenderRow(r, step, i, cur, expand)
   local dn = RXP12.dispNum and RXP12.dispNum[i]
   if dn then r.num:SetText(tostring(dn)) end
   if isCur then
-    r.bg:Show(); r.bg:SetTexture(0.16, 0.42, 0.85, 0.16)
+    r.bg:Hide()                                   -- no blue fill; the green accent marks it
     r.accent:Show(); r.accent:SetTexture(0.3, 1, 0.3, 0.9)
     r.check:Hide(); r.num:Show()
   elseif active then

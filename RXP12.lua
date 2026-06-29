@@ -1854,7 +1854,7 @@ end
 local function CreateUI()
   if RXP12Frame then return end
   local f = CreateFrame("Frame", "RXP12Frame", UIParent)
-  f:SetWidth(340); f:SetHeight(RXP12_Save.h or 340)   -- width fixed; height resizable
+  f:SetWidth(340); f:SetHeight(RXP12_Save.h or 230)   -- width fixed; height resizable
   f:SetResizable(true)
   if f.SetMinResize then f:SetMinResize(340, 170) end
   if f.SetMaxResize then f:SetMaxResize(340, 900) end

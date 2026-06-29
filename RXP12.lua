@@ -1477,8 +1477,8 @@ function RXP12.UpdateUI()
   for i = 1, n do
     local st = RXP12.active[i]
     local r = GetRow(i)
-    if st.xpGate and RXP12.XpGateMet(st.xpGate) then
-      r:Hide(); RXP12.rowY[i] = y          -- gate satisfied: bypass (hidden, like RXP)
+    if st.xpGate and st.xpGate.skip and RXP12.XpGateMet(st.xpGate) then
+      r:Hide(); RXP12.rowY[i] = y          -- skipstep gate not applicable: hide (like a class filter)
     else
       local h = RenderRow(r, st, i, cur)
       r:ClearAllPoints()

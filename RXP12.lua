@@ -203,7 +203,8 @@ function RXP12.Parse(text)
           local _, _, lo, hi = string.find(guide.name, "(%d+)%s*%-%s*(%d+)")
           if lo then guide.lo = tonumber(lo); guide.hi = tonumber(hi) end
         elseif key == "defaultfor" then guide.defaultfor = trim(val)   -- race/class this guide starts
-        elseif key == "group" then guide.group = trim(val)
+        elseif key == "group" then guide.group = trim(val)             -- category (Leveling/Endgame/...)
+        elseif key == "subgroup" then guide.subgroup = trim(val)       -- subcategory within the group
         elseif key == "next" then guide.nextguide = trim(val)          -- chains to the next guide
         end
       else
@@ -292,7 +293,14 @@ local function FindMinimapArrow()
 end
 local function GetPlayerFacing()
   if not minimapArrow then minimapArrow = FindMinimapArrow() end
-  if GetCVar and GetCVar("rotateMinimap") == "1" and MiniMapCompassRing then
+  -- some clients (e.g. Turtle) lack the "rotateMinimap" cvar and GetCVar ERRORS
+  -- on an unknown cvar, so probe it safely; default to the non-rotating path.
+  local rotating = false
+  if GetCVar then
+    local ok, v = pcall(GetCVar, "rotateMinimap")
+    if ok and v == "1" then rotating = true end
+  end
+  if rotating and MiniMapCompassRing then
     return MiniMapCompassRing:GetFacing() * -1
   elseif minimapArrow and minimapArrow.GetFacing then
     return minimapArrow:GetFacing()
@@ -959,6 +967,13 @@ function RXP12.LoadGuideByName(name)
   Print("Loaded: |cffffd200"..name.."|r")
 end
 
+local function byLevel(a, b)
+  local la = RXP12.guides[a].lo or 999
+  local lb = RXP12.guides[b].lo or 999
+  if la ~= lb then return la < lb end
+  return a < b
+end
+
 function RXP12.MenuGroups()
   local seen, order = {}, {}
   for i = 1, table.getn(RXP12.guideOrder) do
@@ -968,12 +983,32 @@ function RXP12.MenuGroups()
   return order
 end
 
-function RXP12.GuidesInGroup(grp)
+-- unique subgroups (subcategories) within a group, in registration order
+function RXP12.SubgroupsInGroup(grp)
+  local seen, order = {}, {}
+  for i = 1, table.getn(RXP12.guideOrder) do
+    local g = RXP12.guides[RXP12.guideOrder[i]]
+    if ((g.group) or "Other") == grp and g.subgroup and not seen[g.subgroup] then
+      seen[g.subgroup] = true; tinsert(order, g.subgroup)
+    end
+  end
+  return order
+end
+
+-- guides in a group, sorted by start level. sub: nil = all; a string = that
+-- subgroup only; false = only guides with no subgroup.
+function RXP12.GuidesInGroup(grp, sub)
   local out = {}
   for i = 1, table.getn(RXP12.guideOrder) do
     local gname = RXP12.guideOrder[i]
-    if ((RXP12.guides[gname].group) or "Other") == grp then tinsert(out, gname) end
+    local g = RXP12.guides[gname]
+    if ((g.group) or "Other") == grp then
+      if sub == nil or (sub == false and not g.subgroup) or (sub and g.subgroup == sub) then
+        tinsert(out, gname)
+      end
+    end
   end
+  table.sort(out, byLevel)
   return out
 end
 
@@ -1006,14 +1041,39 @@ function RXP12.MenuInit()
       UIDropDownMenu_AddButton(info, 1)
     end
   elseif level == 2 then
-    local names = RXP12.GuidesInGroup(UIDROPDOWNMENU_MENU_VALUE)
+    local grp = UIDROPDOWNMENU_MENU_VALUE
+    local subs = RXP12.SubgroupsInGroup(grp)
+    if table.getn(subs) > 0 then
+      -- subcategory tier: one arrow per subgroup, then any guides with no subgroup
+      for si = 1, table.getn(subs) do
+        info = {}; info.text = subs[si]; info.notCheckable = 1
+        info.hasArrow = 1; info.value = grp.."\1"..subs[si]
+        UIDropDownMenu_AddButton(info, 2)
+      end
+      local loose = RXP12.GuidesInGroup(grp, false)
+      for ni = 1, table.getn(loose) do
+        local gname = loose[ni]
+        info = {}; info.text = gname; info.checked = (RXP12_Save.guide == gname)
+        info.func = function() RXP12.LoadGuideByName(gname); CloseDropDownMenus() end
+        UIDropDownMenu_AddButton(info, 2)
+      end
+    else
+      local names = RXP12.GuidesInGroup(grp)
+      for ni = 1, table.getn(names) do
+        local gname = names[ni]
+        info = {}; info.text = gname; info.checked = (RXP12_Save.guide == gname)
+        info.func = function() RXP12.LoadGuideByName(gname); CloseDropDownMenus() end
+        UIDropDownMenu_AddButton(info, 2)
+      end
+    end
+  elseif level == 3 then
+    local _, _, grp, sub = string.find(UIDROPDOWNMENU_MENU_VALUE or "", "^(.-)\1(.*)$")
+    local names = RXP12.GuidesInGroup(grp, sub)
     for ni = 1, table.getn(names) do
       local gname = names[ni]
-      info = {}
-      info.text = gname
-      info.checked = (RXP12_Save.guide == gname)
+      info = {}; info.text = gname; info.checked = (RXP12_Save.guide == gname)
       info.func = function() RXP12.LoadGuideByName(gname); CloseDropDownMenus() end
-      UIDropDownMenu_AddButton(info, 2)
+      UIDropDownMenu_AddButton(info, 3)
     end
   end
 end

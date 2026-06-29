@@ -581,6 +581,20 @@ RXP12.rows = RXP12.rows or {}
 RXP12.rowY = RXP12.rowY or {}
 local ROW_WIDTH = 310
 
+-- measure a wrapped FontString's height. 1.12 FontStrings have NO GetStringHeight
+-- (added in a later client) -- use GetHeight (auto-fits a width-constrained,
+-- single-anchored FontString); fall back to a line-count estimate if it's 0.
+local function FSHeight(fs)
+  if fs.GetStringHeight then
+    local h = fs:GetStringHeight()
+    if h and h > 0 then return h end
+  end
+  local h = fs:GetHeight()
+  if h and h > 0 then return h end
+  local _, breaks = string.gsub(fs:GetText() or "", "\n", "")
+  return (breaks + 1) * 12
+end
+
 -- assemble a step's display text. Only the current step pays for a quest-log
 -- scan (objective progress); other rows stay cheap to render.
 local function StepBodyText(step, isCurrent)
@@ -646,7 +660,7 @@ function RXP12.UpdateUI()
     getglobal("RXP12FrameCounter"):SetText("")
     local r = GetRow(1); r.stepIndex = nil; r.bg:Hide(); r.fs:SetAlpha(1)
     r.fs:SetText("No guide loaded.\nType |cffffd200/rxp12 list|r, then |cffffd200/rxp12 load <name>|r")
-    r:SetHeight(r.fs:GetStringHeight() + 8); r:SetWidth(ROW_WIDTH)
+    r:SetHeight(FSHeight(r.fs) + 8); r:SetWidth(ROW_WIDTH)
     r:ClearAllPoints(); r:SetPoint("TOPLEFT", RXP12ScrollChild, "TOPLEFT", 0, 0); r:Show()
     local idx = 2; while RXP12.rows[idx] do RXP12.rows[idx]:Hide(); idx = idx + 1 end
     RXP12ScrollChild:SetHeight(1)
@@ -674,7 +688,7 @@ function RXP12.UpdateUI()
     r.fs:SetText(marker .. StepBodyText(step, i == cur))
     if i < cur and not active then r.fs:SetAlpha(0.45) else r.fs:SetAlpha(1) end
 
-    local h = r.fs:GetStringHeight() + 6
+    local h = FSHeight(r.fs) + 6
     if h < 16 then h = 16 end
     r:SetHeight(h); r:SetWidth(ROW_WIDTH)
     r:ClearAllPoints()

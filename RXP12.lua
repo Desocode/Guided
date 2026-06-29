@@ -573,74 +573,140 @@ local function ObjectiveLines(step)
 end
 
 -- ---------------------------------------------------------------------- UI ----
+-- RXP shows a scrolling LIST of steps with the current one highlighted, not a
+-- single-step panel. We mirror that: one pooled row per active step in a
+-- ScrollFrame -- current step highlighted, done steps dimmed, pinned stickies
+-- marked, click a row to jump to it, and the list auto-scrolls to the active step.
+RXP12.rows = RXP12.rows or {}
+RXP12.rowY = RXP12.rowY or {}
+local ROW_WIDTH = 310
+
+-- assemble a step's display text. Only the current step pays for a quest-log
+-- scan (objective progress); other rows stay cheap to render.
+local function StepBodyText(step, isCurrent)
+  local lines = {}
+  for k = 1, table.getn(step.text) do tinsert(lines, step.text[k]) end
+  if isCurrent then
+    local ok, objl = pcall(ObjectiveLines, step)
+    if ok and objl then for k = 1, table.getn(objl) do tinsert(lines, objl[k]) end end
+  end
+  for k = 1, table.getn(step.gotos) do
+    tinsert(lines, "|cffffd200> "..step.gotos[k].."|r")
+  end
+  if step.level then tinsert(lines, "|cff88ccff> Reach level "..step.level.."|r") end
+  local body = table.concat(lines, "\n")
+  if body == "" then body = "|cff888888(no description)|r" end
+  return body
+end
+
+local function GetRow(i)
+  if RXP12.rows[i] then return RXP12.rows[i] end
+  local r = CreateFrame("Button", "RXP12Row"..i, RXP12ScrollChild)
+  r:SetWidth(ROW_WIDTH)
+  r.bg = r:CreateTexture(nil, "BACKGROUND")
+  r.bg:SetAllPoints()
+  r.bg:SetTexture(0.20, 0.45, 0.85, 0.30)   -- current-step highlight
+  r.bg:Hide()
+  r:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
+  local hl = r:GetHighlightTexture(); if hl then hl:SetVertexColor(1, 1, 1, 0.12) end
+  r.fs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+  r.fs:SetPoint("TOPLEFT", r, "TOPLEFT", 6, -3)
+  r.fs:SetWidth(ROW_WIDTH - 12)
+  r.fs:SetJustifyH("LEFT"); r.fs:SetJustifyV("TOP")
+  r:SetScript("OnClick", function() if this.stepIndex then RXP12.SetStep(this.stepIndex) end end)
+  RXP12.rows[i] = r
+  return r
+end
+
+function RXP12.ScrollToStep(cur)
+  if not RXP12ScrollFrame then return end
+  local maxScroll = RXP12ScrollChild:GetHeight() - RXP12ScrollFrame:GetHeight()
+  if maxScroll < 0 then maxScroll = 0 end
+  local target = (RXP12.rowY[cur] or 0) - 24      -- keep a little context above
+  if target < 0 then target = 0 end
+  if target > maxScroll then target = maxScroll end
+  RXP12ScrollFrame:SetVerticalScroll(target)
+end
+
+function RXP12.WheelScroll(dir)
+  if not RXP12ScrollFrame then return end
+  local maxScroll = RXP12ScrollChild:GetHeight() - RXP12ScrollFrame:GetHeight()
+  if maxScroll < 0 then maxScroll = 0 end
+  local v = RXP12ScrollFrame:GetVerticalScroll() - (dir or 0) * 32
+  if v < 0 then v = 0 end
+  if v > maxScroll then v = maxScroll end
+  RXP12ScrollFrame:SetVerticalScroll(v)
+end
+
 function RXP12.UpdateUI()
   if not RXP12Frame then return end
   local g = RXP12.CurrentGuide()
   if not g or not RXP12.active then
     getglobal("RXP12FrameTitle"):SetText("RXP12 -- no guide")
     getglobal("RXP12FrameCounter"):SetText("")
-    getglobal("RXP12FrameBody"):SetText("No guide loaded. Type /rxp12 list")
+    local r = GetRow(1); r.stepIndex = nil; r.bg:Hide(); r.fs:SetAlpha(1)
+    r.fs:SetText("No guide loaded.\nType |cffffd200/rxp12 list|r, then |cffffd200/rxp12 load <name>|r")
+    r:SetHeight(r.fs:GetStringHeight() + 8); r:SetWidth(ROW_WIDTH)
+    r:ClearAllPoints(); r:SetPoint("TOPLEFT", RXP12ScrollChild, "TOPLEFT", 0, 0); r:Show()
+    local idx = 2; while RXP12.rows[idx] do RXP12.rows[idx]:Hide(); idx = idx + 1 end
+    RXP12ScrollChild:SetHeight(1)
     RXP12.SetWaypoint(nil)
     return
   end
   getglobal("RXP12FrameTitle"):SetText(g.name)
   local n = table.getn(RXP12.active)
-  local i = RXP12_Save.step or 1
-  getglobal("RXP12FrameCounter"):SetText(i.." / "..n)
+  local cur = RXP12_Save.step or 1
+  getglobal("RXP12FrameCounter"):SetText(cur.." / "..n)
 
-  local step = RXP12.active[i]
-  local lines = {}
+  RXP12.rowY = {}
+  local y = 0
+  for i = 1, n do
+    local step = RXP12.active[i]
+    local r = GetRow(i)
+    r.stepIndex = i
 
-  -- pinned sticky steps (kept active while you work the current step); show
-  -- them first, dimmed, sorted by their position so the order is stable.
-  if RXP12.activeStickies then
-    local order = {}
-    for idx in pairs(RXP12.activeStickies) do
-      if idx ~= i then tinsert(order, idx) end
-    end
-    table.sort(order)
-    for o = 1, table.getn(order) do
-      local ss = RXP12.active[order[o]]
-      if ss then
-        for k = 1, table.getn(ss.text) do
-          tinsert(lines, "|cffaaaaaa* "..ss.text[k].."|r")
-        end
-      end
-    end
+    local marker
+    local active = RXP12.activeStickies and RXP12.activeStickies[i]
+    if i == cur then marker = "|cff33ff33> |r"; r.bg:Show()
+    elseif active then marker = "|cffffcc00* |r"; r.bg:Hide()
+    else marker = "|cffaaaaaa- |r"; r.bg:Hide() end
+
+    r.fs:SetText(marker .. StepBodyText(step, i == cur))
+    if i < cur and not active then r.fs:SetAlpha(0.45) else r.fs:SetAlpha(1) end
+
+    local h = r.fs:GetStringHeight() + 6
+    if h < 16 then h = 16 end
+    r:SetHeight(h); r:SetWidth(ROW_WIDTH)
+    r:ClearAllPoints()
+    r:SetPoint("TOPLEFT", RXP12ScrollChild, "TOPLEFT", 0, -y)
+    r:Show()
+    RXP12.rowY[i] = y
+    y = y + h
   end
+  local idx = n + 1
+  while RXP12.rows[idx] do RXP12.rows[idx]:Hide(); idx = idx + 1 end
 
-  if step then
-    for k = 1, table.getn(step.text) do tinsert(lines, step.text[k]) end
-    -- live objective progress from the quest log (e.g. "  - Boar Hide: 3/8")
-    local ok, objl = pcall(ObjectiveLines, step)
-    if ok and objl then
-      for k = 1, table.getn(objl) do tinsert(lines, objl[k]) end
-    end
-    for k = 1, table.getn(step.gotos) do
-      tinsert(lines, "|cffffd200> Go to: "..step.gotos[k].."|r")
-    end
-    if step.level then tinsert(lines, "|cff88ccff> Reach level "..step.level.."|r") end
-  end
-  if table.getn(lines) == 0 then tinsert(lines, "(no description)") end
-  getglobal("RXP12FrameBody"):SetText(table.concat(lines, "\n"))
-  RXP12.SetWaypoint(step)
+  RXP12ScrollChild:SetWidth(ROW_WIDTH)
+  RXP12ScrollChild:SetHeight(y > 0 and y or 1)
+  RXP12.ScrollToStep(cur)
+  RXP12.SetWaypoint(RXP12.active[cur])
 end
 
 local function CreateUI()
   if RXP12Frame then return end
   local f = CreateFrame("Frame", "RXP12Frame", UIParent)
-  f:SetWidth(340); f:SetHeight(180)
+  f:SetWidth(340); f:SetHeight(320)
   if RXP12_Save.pos then
     f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", RXP12_Save.pos.x, RXP12_Save.pos.y)
   else
-    f:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
   end
   f:SetBackdrop({
     bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
     edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
     tile = true, tileSize = 16, edgeSize = 16,
     insets = { left = 4, right = 4, top = 4, bottom = 4 } })
-  f:SetBackdropColor(0, 0, 0, 0.8)
+  f:SetBackdropColor(0, 0, 0, 0.85)
   f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
   f:SetScript("OnDragStart", function() if not RXP12_Save.locked then this:StartMoving() end end)
   f:SetScript("OnDragStop", function()
@@ -653,11 +719,17 @@ local function CreateUI()
   title:SetText("RXP12")
 
   local counter = f:CreateFontString("RXP12FrameCounter", "OVERLAY", "GameFontHighlightSmall")
-  counter:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, -12)
+  counter:SetPoint("TOPRIGHT", f, "TOPRIGHT", -28, -12)
 
-  local body = f:CreateFontString("RXP12FrameBody", "OVERLAY", "GameFontHighlight")
-  body:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -32)
-  body:SetWidth(316); body:SetJustifyH("LEFT"); body:SetJustifyV("TOP")
+  -- scrolling step list
+  local sf = CreateFrame("ScrollFrame", "RXP12ScrollFrame", f)
+  sf:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -30)
+  sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 34)
+  local child = CreateFrame("Frame", "RXP12ScrollChild", sf)
+  child:SetWidth(ROW_WIDTH); child:SetHeight(1)
+  sf:SetScrollChild(child)
+  sf:EnableMouseWheel(true)
+  sf:SetScript("OnMouseWheel", function() RXP12.WheelScroll(arg1) end)
 
   local prev = CreateFrame("Button", "RXP12FramePrev", f, "UIPanelButtonTemplate")
   prev:SetWidth(70); prev:SetHeight(20)

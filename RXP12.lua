@@ -1268,7 +1268,12 @@ end
 function RXP12.OpenMenu(stepIndex, anchor)
   if not RXP12Menu then return end
   RXP12.menuStep = stepIndex
-  ToggleDropDownMenu(1, nil, RXP12Menu, anchor or "cursor", 0, 0)
+  -- Always anchor to the cog (a stable left-side point), NOT the cursor: vanilla
+  -- opens submenus to the RIGHT of the parent, and a cursor anchor near a screen
+  -- edge flips them back over the parent (menus "clip into each other"). Close any
+  -- stale menu first so re-opening never stacks frames.
+  CloseDropDownMenus()
+  ToggleDropDownMenu(1, nil, RXP12Menu, "RXP12FrameCog", 0, 0)
 end
 
 function RXP12.ToggleMenu()

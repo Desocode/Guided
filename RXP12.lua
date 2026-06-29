@@ -48,10 +48,10 @@ local function Sanitize(s)
   s = string.gsub(s, "|cRXP_(%a+)_", function(t)
     return "|c" .. (RXP_COLORS[t] or "ffffffff")
   end)
-  -- guides embed |T<FileDataID>:..|t icons (numeric IDs) that 1.12 cannot render
-  -- (vanilla needs texture PATHS); strip them so they don't show as broken glyphs.
-  -- Path-based |TInterface\..|t icons (start with a letter) are left intact.
-  s = string.gsub(s, "|T%d+[^|]*|t", "")
+  -- vanilla 1.12 does NOT support inline texture escapes (|T..|t) in FontStrings
+  -- (added in a later client) -- they render as literal text. Strip them all;
+  -- RXP12 shows type icons via real Texture objects instead.
+  s = string.gsub(s, "|T[^|]*|t", "")
   return s
 end
 
@@ -62,9 +62,14 @@ local function normalize(s) return string.gsub(string.lower(s or ""), "%s", "") 
 local function mymod(a, b) return a - math.floor(a / b) * b end
 local function lc(s) return string.lower(trim(s or "")) end
 
+-- guides gate steps by client/version with "<<" tokens (era/sod/tbc/...). On a
+-- 1.12 / Turtle client we ARE vanilla-era content; everything else is absent, so
+-- "sod"/"som"/"tbc"/"wotlk"/"cata"/"mop"/"retail"/"df" tokens evaluate false.
+local CLIENT_TRAITS = { classic = true, era = true, vanilla = true }
 local function MatchToken(tok)
   local nx = normalize(tok)
   return nx == RXP12.me.class or nx == RXP12.me.race or nx == RXP12.me.faction
+      or CLIENT_TRAITS[nx] == true
 end
 
 -- evaluate an RXP "<<" condition. Grammar:
@@ -204,7 +209,16 @@ function RXP12.Parse(text)
           if lo then guide.lo = tonumber(lo); guide.hi = tonumber(hi) end
         elseif key == "defaultfor" then guide.defaultfor = trim(val)   -- race/class this guide starts
         elseif key == "group" then guide.group = trim(val)             -- category (Leveling/Endgame/...)
-        elseif key == "subgroup" then guide.subgroup = trim(val)       -- subcategory within the group
+        elseif key == "subgroup" then                                  -- subcategory within the group
+          local v = trim(val)
+          local _, _, nm, cond = string.find(v, "^(.-)%s*<<%s*(.*)$")
+          if cond and cond ~= "" then
+            -- conditional (e.g. per class); resolved at menu time when identity is known
+            guide.subgroupCond = guide.subgroupCond or {}
+            tinsert(guide.subgroupCond, { name = trim(nm), cond = trim(cond) })
+          else
+            guide.subgroup = v
+          end
         elseif key == "next" then guide.nextguide = trim(val)          -- chains to the next guide
         end
       else
@@ -632,7 +646,8 @@ local GUTTER = 26                       -- left column for the step-number badge
 local CONTENT_X = GUTTER + 4
 local CONTENT_W = ROW_WIDTH - CONTENT_X - 6
 
--- typed inline icons -- all stock 1.12 textures, rendered via |Tpath:size|t
+-- typed icons -- all stock 1.12 texture paths, drawn as real Texture objects
+-- (1.12 FontStrings can't render inline |T..|t escapes)
 local KIND_ICON = {
   accept   = "Interface\\GossipFrame\\AvailableQuestIcon",
   turnin   = "Interface\\GossipFrame\\ActiveQuestIcon",
@@ -644,11 +659,11 @@ local KIND_ICON = {
   train    = "Interface\\GossipFrame\\TrainerGossipIcon",
   hearth   = "Interface\\Icons\\INV_Misc_Rune_01",
 }
+-- text only -- the type icon is drawn as a real Texture beside the line, since
+-- 1.12 FontStrings can't render inline |T..|t escapes.
 local function ElementLine(el)
-  local p = KIND_ICON[el.kind]
-  local pre = p and ("|T"..p..":13|t ") or ""
-  if el.kind == "level" then return pre.."|cff88ccff"..(el.text or "").."|r" end
-  return pre..(el.text or "")
+  if el.kind == "level" then return "|cff88ccff"..(el.text or "").."|r" end
+  return el.text or ""
 end
 
 -- class icon coords on the stock character-create class sheet
@@ -704,6 +719,10 @@ local function GetElemRow(r, j)
   er.check = CreateFrame("CheckButton", nil, er, "UICheckButtonTemplate")
   er.check:SetWidth(18); er.check:SetHeight(18)
   er.check:SetPoint("TOPLEFT", er, "TOPLEFT", 0, 0)
+  er.icon = er:CreateTexture(nil, "OVERLAY")
+  er.icon:SetWidth(13); er.icon:SetHeight(13)
+  er.icon:SetPoint("TOPLEFT", er, "TOPLEFT", 21, -2)
+  er.icon:Hide()
   er.fs = er:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
   er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", 22, -2)
   er.fs:SetWidth(CONTENT_W - 22)
@@ -754,6 +773,10 @@ local function GetRow(i)
   r.fs:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -4)
   r.fs:SetWidth(CONTENT_W)
   r.fs:SetJustifyH("LEFT"); r.fs:SetJustifyV("TOP")
+  r.kindIcon = r:CreateTexture(nil, "OVERLAY")     -- primary type icon (compact rows)
+  r.kindIcon:SetWidth(13); r.kindIcon:SetHeight(13)
+  r.kindIcon:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -4)
+  r.kindIcon:Hide()
   -- progress bar (current step)
   r.bar = CreateFrame("StatusBar", nil, r)
   r.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
@@ -799,7 +822,7 @@ local function RenderRow(r, step, i, cur)
   local h
   if isCur then
     -- expanded: one checkbox row per element + objective lines + progress bar
-    r.fs:Hide()
+    r.fs:Hide(); r.kindIcon:Hide()
     local y = 2
     local els = step.elements or {}
     local nEls = table.getn(els)
@@ -810,7 +833,10 @@ local function RenderRow(r, step, i, cur)
       er.tip = el.text
       er.check:Show()
       er:SetScript("OnClick", er._onclick)
-      er.fs:ClearAllPoints(); er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", 22, -2); er.fs:SetWidth(CONTENT_W - 22)
+      local ip = KIND_ICON[el.kind]
+      local fx = 22
+      if ip then er.icon:SetTexture(ip); er.icon:Show(); fx = 37 else er.icon:Hide() end
+      er.fs:ClearAllPoints(); er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", fx, -2); er.fs:SetWidth(CONTENT_W - fx)
       er.fs:SetText(ElementLine(el))
       er.check:SetChecked(el.checked and true or false)
       local eh = FSHeight(er.fs); if eh < 18 then eh = 18 end
@@ -824,7 +850,7 @@ local function RenderRow(r, step, i, cur)
     if ok and objl and table.getn(objl) > 0 then
       local j = nEls + 1
       local er = GetElemRow(r, j); er.element = nil; er.tip = nil
-      er.check:Hide()
+      er.check:Hide(); er.icon:Hide()
       er:SetScript("OnClick", nil)
       er.fs:ClearAllPoints(); er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", 4, -2); er.fs:SetWidth(CONTENT_W - 4)
       er.fs:SetText(table.concat(objl, "\n"))
@@ -864,13 +890,25 @@ local function RenderRow(r, step, i, cur)
     end
     h = y + 4
   else
-    -- compact: hide expansion, single icon-line body
+    -- compact: hide expansion, single body with one leading type icon
     r.bar:Hide()
     if r.elems then local k = 1; while r.elems[k] do r.elems[k]:Hide(); k = k + 1 end end
+    local ip
+    for j = 1, table.getn(step.elements or {}) do
+      local ic = KIND_ICON[step.elements[j].kind]
+      if ic then ip = ic; break end
+    end
+    local fx = CONTENT_X
+    if ip then
+      r.kindIcon:SetTexture(ip); r.kindIcon:SetAlpha(dim and 0.5 or 1); r.kindIcon:Show(); fx = CONTENT_X + 16
+    else
+      r.kindIcon:Hide()
+    end
     local lines = {}
     for j = 1, table.getn(step.elements or {}) do tinsert(lines, ElementLine(step.elements[j])) end
     local body = table.concat(lines, "\n")
     if body == "" then body = "|cff777777(no description)|r" end
+    r.fs:ClearAllPoints(); r.fs:SetPoint("TOPLEFT", r, "TOPLEFT", fx, -4); r.fs:SetWidth(ROW_WIDTH - fx - 6)
     r.fs:SetText(body)
     r.fs:SetAlpha(dim and 0.5 or 1)
     r.fs:Show()
@@ -911,8 +949,9 @@ function RXP12.UpdateUI()
     getglobal("RXP12FrameTitle"):SetText("RXP12 -- no guide")
     getglobal("RXP12FrameCounter"):SetText("")
     if RXP12FrameClassIcon then RXP12FrameClassIcon:Hide() end
-    local r = GetRow(1); r.stepIndex = nil; r.bg:Hide(); r.accent:Hide(); r.num:Hide(); r.check:Hide(); r.bar:Hide()
+    local r = GetRow(1); r.stepIndex = nil; r.bg:Hide(); r.accent:Hide(); r.num:Hide(); r.check:Hide(); r.bar:Hide(); r.kindIcon:Hide()
     if r.elems then local k=1; while r.elems[k] do r.elems[k]:Hide(); k=k+1 end end
+    r.fs:ClearAllPoints(); r.fs:SetPoint("TOPLEFT", r, "TOPLEFT", 8, -4); r.fs:SetWidth(ROW_WIDTH - 16)
     r.fs:Show(); r.fs:SetAlpha(1)
     r.fs:SetText("No guide loaded.\nType |cffffd200/rxp12 list|r, then |cffffd200/rxp12 load <name>|r")
     r:SetHeight(FSHeight(r.fs) + 8); r:SetWidth(ROW_WIDTH)
@@ -974,6 +1013,18 @@ local function byLevel(a, b)
   return a < b
 end
 
+-- resolve a guide's subcategory for THIS character: a plain #subgroup, else the
+-- first conditional #subgroup whose "<<" condition matches (e.g. per-class sets).
+function RXP12.GuideSubgroup(g)
+  if g.subgroup then return g.subgroup end
+  if g.subgroupCond then
+    for i = 1, table.getn(g.subgroupCond) do
+      if RXP12.EvalCondition(g.subgroupCond[i].cond) then return g.subgroupCond[i].name end
+    end
+  end
+  return nil
+end
+
 function RXP12.MenuGroups()
   local seen, order = {}, {}
   for i = 1, table.getn(RXP12.guideOrder) do
@@ -988,8 +1039,9 @@ function RXP12.SubgroupsInGroup(grp)
   local seen, order = {}, {}
   for i = 1, table.getn(RXP12.guideOrder) do
     local g = RXP12.guides[RXP12.guideOrder[i]]
-    if ((g.group) or "Other") == grp and g.subgroup and not seen[g.subgroup] then
-      seen[g.subgroup] = true; tinsert(order, g.subgroup)
+    local sub = RXP12.GuideSubgroup(g)
+    if ((g.group) or "Other") == grp and sub and not seen[sub] then
+      seen[sub] = true; tinsert(order, sub)
     end
   end
   return order
@@ -1003,7 +1055,8 @@ function RXP12.GuidesInGroup(grp, sub)
     local gname = RXP12.guideOrder[i]
     local g = RXP12.guides[gname]
     if ((g.group) or "Other") == grp then
-      if sub == nil or (sub == false and not g.subgroup) or (sub and g.subgroup == sub) then
+      local gsub = RXP12.GuideSubgroup(g)
+      if sub == nil or (sub == false and not gsub) or (sub and gsub == sub) then
         tinsert(out, gname)
       end
     end

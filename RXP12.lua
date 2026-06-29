@@ -1390,6 +1390,10 @@ function RXP12.MenuInit()
     info.func = function() RXP12.ShowDungeons(); CloseDropDownMenus() end
     UIDropDownMenu_AddButton(info, 1)
 
+    info = {}; info.text = "Leveling tracker"; info.checked = (RXP12_Save.tracker == true)
+    info.func = function() RXP12.ToggleTracker(); CloseDropDownMenus() end
+    UIDropDownMenu_AddButton(info, 1)
+
     info = {}; info.text = "Auto-detect my guide"; info.notCheckable = 1
     info.func = function()
       local best = RXP12.AutoSelectGuide()
@@ -1561,6 +1565,126 @@ local function CreateUI()
 end
 
 -- ------------------------------------------------------------- options UI ----
+-- ----------------------------------------------------------- minimap button ----
+local function MinimapButtonPos()
+  local b = RXP12MinimapButton
+  if not b then return end
+  local a = math.rad(RXP12_Save.mmangle or 210)
+  b:ClearAllPoints()
+  b:SetPoint("CENTER", Minimap, "CENTER", 80 * math.cos(a), 80 * math.sin(a))
+end
+
+local function CreateMinimapButton()
+  if RXP12MinimapButton then return end
+  local b = CreateFrame("Button", "RXP12MinimapButton", Minimap)
+  b:SetWidth(31); b:SetHeight(31); b:SetFrameStrata("MEDIUM"); b:SetFrameLevel(8)
+  b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  b:RegisterForDrag("LeftButton")
+  local icon = b:CreateTexture(nil, "BACKGROUND")
+  icon:SetWidth(20); icon:SetHeight(20); icon:SetPoint("CENTER", b, "CENTER", 0, 1)
+  icon:SetTexture("Interface\\Icons\\INV_Misc_Map_01")
+  local ring = b:CreateTexture(nil, "OVERLAY")
+  ring:SetWidth(53); ring:SetHeight(53); ring:SetPoint("TOPLEFT", b, "TOPLEFT", 0, 0)
+  ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+  b:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+  b:SetScript("OnClick", function()
+    if arg1 == "RightButton" then
+      RXP12.menuStep = nil; CloseDropDownMenus()
+      if RXP12Menu then ToggleDropDownMenu(1, nil, RXP12Menu, "RXP12MinimapButton", 0, 0) end
+    else
+      RXP12.Toggle()
+    end
+  end)
+  b:SetScript("OnDragStart", function()
+    this:SetScript("OnUpdate", function()
+      local mx, my = Minimap:GetCenter()
+      local sc = UIParent:GetEffectiveScale()
+      local cx, cy = GetCursorPosition()
+      if mx and cx then
+        RXP12_Save.mmangle = atan2(cy / sc - my, cx / sc - mx)
+        MinimapButtonPos()
+      end
+    end)
+  end)
+  b:SetScript("OnDragStop", function() this:SetScript("OnUpdate", nil) end)
+  b:SetScript("OnEnter", function()
+    GameTooltip:SetOwner(this, "ANCHOR_LEFT"); GameTooltip:SetText("RXP12", 1, 1, 1)
+    GameTooltip:AddLine("Left-click: toggle guide", 0.8, 0.8, 0.8)
+    GameTooltip:AddLine("Right-click: menu", 0.8, 0.8, 0.8); GameTooltip:Show()
+  end)
+  b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  MinimapButtonPos()
+end
+
+function RXP12.UpdateMinimapButton()
+  CreateMinimapButton()
+  if RXP12_Save.minimap == false then RXP12MinimapButton:Hide() else RXP12MinimapButton:Show() end
+end
+
+-- --------------------------------------------------------- leveling tracker ----
+local function fmtTime(sec)
+  sec = math.floor(sec or 0)
+  local h = math.floor(sec / 3600)
+  local m = math.floor((sec - h * 3600) / 60)
+  if h > 0 then return h.."h "..m.."m" end
+  if m > 0 then return m.."m" end
+  return sec.."s"
+end
+
+function RXP12.UpdateTracker()
+  if not RXP12TrackerFrame or not RXP12TrackerFrame:IsVisible() then return end
+  local t = RXP12.trk; if not t then return end
+  local elapsed = GetTime() - (t.t0 or GetTime())
+  local xps = (elapsed > 0) and (t.xp / elapsed) or 0
+  local rem = (UnitXPMax("player") or 1) - (UnitXP("player") or 0)
+  local ttl = (xps > 0 and rem > 0) and (rem / xps) or 0
+  local lvlTime = GetTime() - (t.lvlStart or t.t0 or GetTime())
+  getglobal("RXP12TrackerText"):SetText(
+    "|cffffd200Level "..UnitLevel("player").."|r |cff999999("..fmtTime(lvlTime)..")|r\n"..
+    "XP/hr: |cff66cc66"..math.floor(xps * 3600).."|r\n"..
+    "To level: |cff88ccff"..(ttl > 0 and fmtTime(ttl) or "--").."|r")
+end
+
+local function CreateTracker()
+  if RXP12TrackerFrame then return end
+  local f = CreateFrame("Frame", "RXP12TrackerFrame", UIParent)
+  f:SetWidth(152); f:SetHeight(56)
+  if RXP12_Save.trkpos then
+    f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", RXP12_Save.trkpos.x, RXP12_Save.trkpos.y)
+  else
+    f:SetPoint("CENTER", UIParent, "CENTER", 300, 100)
+  end
+  f:SetBackdrop({
+    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile = true, tileSize = 16, edgeSize = 14,
+    insets = { left = 4, right = 4, top = 4, bottom = 4 } })
+  f:SetBackdropColor(0.05, 0.05, 0.07, 0.85)
+  f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
+  f:SetScript("OnDragStart", function() this:StartMoving() end)
+  f:SetScript("OnDragStop", function()
+    this:StopMovingOrSizing(); RXP12_Save.trkpos = { x = this:GetLeft(), y = this:GetTop() }
+  end)
+  local txt = f:CreateFontString("RXP12TrackerText", "OVERLAY", "GameFontHighlightSmall")
+  txt:SetPoint("TOPLEFT", f, "TOPLEFT", 8, -6); txt:SetJustifyH("LEFT")
+  f.acc = 0
+  f:SetScript("OnUpdate", function()
+    f.acc = f.acc + (arg1 or 0)
+    if f.acc >= 1 then f.acc = 0; RXP12.UpdateTracker() end
+  end)
+  f:Hide()
+end
+
+function RXP12.ApplyTracker()
+  CreateTracker()
+  if RXP12_Save.tracker then RXP12TrackerFrame:Show(); RXP12.UpdateTracker() else RXP12TrackerFrame:Hide() end
+end
+
+function RXP12.ToggleTracker()
+  RXP12_Save.tracker = not RXP12_Save.tracker
+  RXP12.ApplyTracker()
+end
+
 local function MakeCheck(parent, name, label, y, getter, setter)
   local c = CreateFrame("CheckButton", name, parent, "UICheckButtonTemplate")
   c:SetWidth(26); c:SetHeight(26)
@@ -1603,6 +1727,10 @@ local function CreateOptions()
   MakeCheck(f, "RXP12OptLock", "Lock guide window", -92,
     function() return RXP12_Save.locked end,
     function(v) RXP12_Save.locked = v end)
+
+  MakeCheck(f, "RXP12OptMinimap", "Show minimap button", -120,
+    function() return RXP12_Save.minimap ~= false end,
+    function(v) RXP12_Save.minimap = v; RXP12.UpdateMinimapButton() end)
 
   local s = CreateFrame("Slider", "RXP12OptScale", f, "OptionsSliderTemplate")
   s:SetWidth(220); s:SetHeight(16)
@@ -1658,6 +1786,7 @@ function RXP12.ToggleOptions()
     if RXP12OptAuto then RXP12OptAuto:SetChecked(RXP12_Save.auto and true or false) end
     if RXP12OptArrow then RXP12OptArrow:SetChecked(RXP12_Save.arrow and true or false) end
     if RXP12OptLock then RXP12OptLock:SetChecked(RXP12_Save.locked and true or false) end
+    if RXP12OptMinimap then RXP12OptMinimap:SetChecked(RXP12_Save.minimap ~= false) end
     if RXP12OptScale then RXP12OptScale:SetValue(RXP12_Save.scale or 1) end
     if RXP12OptOpacity then RXP12OptOpacity:SetValue(RXP12_Save.opacity or 0.92) end
     RXP12OptionsFrame:Show()
@@ -1847,6 +1976,9 @@ local function Defaults()
   if RXP12_Save.opacity == nil then RXP12_Save.opacity = 0.92 end
   if RXP12_Save.dungeons == nil then RXP12_Save.dungeons = {} end
   if RXP12_Save.done == nil then RXP12_Save.done = {} end   -- per-guide [gindex]=true (auto-completed)
+  if RXP12_Save.minimap == nil then RXP12_Save.minimap = true end
+  if RXP12_Save.splits == nil then RXP12_Save.splits = {} end
+  if RXP12_Save.tracker == nil then RXP12_Save.tracker = false end
 end
 
 -- score a guide for "is this the right one to start me on?" given the player level.
@@ -1896,6 +2028,7 @@ ev:RegisterEvent("PLAYER_LOGIN")
 ev:RegisterEvent("QUEST_LOG_UPDATE")
 ev:RegisterEvent("UNIT_QUEST_LOG_CHANGED")
 ev:RegisterEvent("PLAYER_LEVEL_UP")
+ev:RegisterEvent("PLAYER_XP_UPDATE")
 ev:RegisterEvent("QUEST_DETAIL")      -- auto quest interaction (gated on RXP12_Save.auto)
 ev:RegisterEvent("QUEST_PROGRESS")
 ev:RegisterEvent("QUEST_COMPLETE")
@@ -1918,6 +2051,10 @@ local function OnEvent()
     RXP12.BuildActive()
     CreateUI()
     CreateArrow()
+    RXP12.UpdateMinimapButton()
+    RXP12.trk = { t0 = GetTime(), xp = 0, lastXP = UnitXP("player") or 0,
+                  lastMax = UnitXPMax("player") or 1, lvlStart = GetTime() }
+    RXP12.ApplyTracker()
     if RXP12_Save.scale and RXP12Frame then RXP12Frame:SetScale(RXP12_Save.scale) end
     if RXP12_Save.shown then RXP12.Show() else RXP12.Hide() end
     RXP12.SkipForward()   -- resume at the first not-yet-completed step
@@ -1925,9 +2062,26 @@ local function OnEvent()
       .."|r  (/rxp12 list · /rxp12 detect · /rxp12 options)")
   elseif event == "QUEST_LOG_UPDATE" or event == "UNIT_QUEST_LOG_CHANGED"
       or event == "PLAYER_LEVEL_UP" then
-    if event == "PLAYER_LEVEL_UP" then RXP12.BuildActive() end   -- re-filter maxlevel/level steps
+    if event == "PLAYER_LEVEL_UP" then
+      local t = RXP12.trk
+      if t then
+        local newlv = tonumber(arg1) or UnitLevel("player")
+        RXP12_Save.splits[newlv - 1] = GetTime() - (t.lvlStart or GetTime())
+        t.lvlStart = GetTime(); t.lastXP = UnitXP("player") or 0; t.lastMax = UnitXPMax("player") or 1
+      end
+      RXP12.BuildActive()   -- re-filter maxlevel/level steps
+    end
     RXP12.CheckAuto()
     RXP12.UpdateUI()
+  elseif event == "PLAYER_XP_UPDATE" then
+    local t = RXP12.trk
+    if t then
+      local cur = UnitXP("player") or 0
+      local g = (cur >= t.lastXP) and (cur - t.lastXP) or ((t.lastMax - t.lastXP) + cur)
+      if g > 0 then t.xp = t.xp + g end
+      t.lastXP = cur; t.lastMax = UnitXPMax("player") or 1
+      RXP12.UpdateTracker()
+    end
   elseif event == "QUEST_DETAIL" or event == "QUEST_PROGRESS"
       or event == "QUEST_COMPLETE" or event == "QUEST_GREETING"
       or event == "GOSSIP_SHOW" then
@@ -1950,6 +2104,10 @@ SlashCmdList["RXP12"] = function(msg)
   elseif cmd == "prev" or cmd == "back" then RXP12.Back()
   elseif cmd == "target" then RXP12.TargetStep()
   elseif cmd == "use" then RXP12.UseStep()
+  elseif cmd == "tracker" then RXP12.ToggleTracker()
+  elseif cmd == "minimap" then
+    RXP12_Save.minimap = (RXP12_Save.minimap == false); RXP12.UpdateMinimapButton()
+    Print("Minimap button "..(RXP12_Save.minimap ~= false and "shown" or "hidden"))
   elseif cmd == "options" or cmd == "config" or cmd == "opt" then RXP12.ToggleOptions()
   elseif cmd == "dungeons" then RXP12.ShowDungeons()
   elseif cmd == "import" then

@@ -840,6 +840,17 @@ function RXP12.SkipForward()
     if RXP12.StepDoneByIndex(idx, log) then RXP12.activeStickies[idx] = nil end
   end
 
+  -- (re)pin sticky side-steps behind the current step that are still relevant.
+  -- activeStickies isn't persisted, so after a /reload (current step restored
+  -- past a sticky) this rebuilds the pins instead of leaving them greyed.
+  local cur0 = RXP12_Save.step or 1
+  for i = 1, cur0 - 1 do
+    local sp = RXP12.active[i]
+    if sp and sp.sticky and not RXP12.StepDoneByIndex(i, log) then
+      RXP12.activeStickies[i] = true
+    end
+  end
+
   local guard = 0
   while (RXP12_Save.step or 1) < n and guard < 2000 do
     guard = guard + 1

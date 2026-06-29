@@ -1208,6 +1208,10 @@ function RXP12.MenuInit()
     info.func = function() RXP12.ToggleOptions(); CloseDropDownMenus() end
     UIDropDownMenu_AddButton(info, 1)
 
+    info = {}; info.text = "Import guide..."; info.notCheckable = 1
+    info.func = function() RXP12.ShowImport(); CloseDropDownMenus() end
+    UIDropDownMenu_AddButton(info, 1)
+
     info = {}; info.text = "Auto-detect my guide"; info.notCheckable = 1
     info.func = function()
       local best = RXP12.AutoSelectGuide()
@@ -1475,6 +1479,95 @@ function RXP12.ToggleOptions()
   end
 end
 
+-- ----------------------------------------------------------- guide import ----
+-- Register pasted guides at runtime (no client restart) via the same path guide
+-- files use. Accepts either raw guide text or one/more RXPGuides.RegisterGuide([[
+-- ... ]]) blocks. Persists the raw text per character so imports survive /reload.
+function RXP12.ImportGuide(text)
+  if not text or trim(text) == "" then return 0 end
+  local blocks = {}
+  for block in string.gfind(text, "%[%[(.-)%]%]") do tinsert(blocks, block) end
+  if table.getn(blocks) == 0 then blocks = { text } end   -- raw guide body, no [[ ]]
+  RXP12_Save.imports = RXP12_Save.imports or {}
+  local n = 0
+  for i = 1, table.getn(blocks) do
+    local before = table.getn(RXP12.guideOrder)
+    local ok = pcall(RXP12.RegisterGuide, blocks[i])
+    if ok and table.getn(RXP12.guideOrder) >= before then
+      tinsert(RXP12_Save.imports, blocks[i]); n = n + 1
+    end
+  end
+  return n
+end
+
+local function CreateImport()
+  if RXP12ImportFrame then return end
+  local f = CreateFrame("Frame", "RXP12ImportFrame", UIParent)
+  f:SetWidth(440); f:SetHeight(320)
+  f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+  f:SetFrameStrata("DIALOG")
+  f:SetBackdrop({
+    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile = true, tileSize = 16, edgeSize = 16,
+    insets = { left = 4, right = 4, top = 4, bottom = 4 } })
+  f:SetBackdropColor(0.05, 0.05, 0.07, 0.95)
+  f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
+  f:SetScript("OnDragStart", function() this:StartMoving() end)
+  f:SetScript("OnDragStop", function() this:StopMovingOrSizing() end)
+
+  local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  title:SetPoint("TOP", f, "TOP", 0, -10); title:SetText("Import Guide")
+  local hint = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  hint:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -28)
+  hint:SetWidth(412); hint:SetJustifyH("LEFT")
+  hint:SetText("Paste a guide (a RegisterGuide([[...]]) block or raw guide text), then Import. "
+    .."Loads immediately -- no restart -- and is remembered for this character.")
+
+  local eb = CreateFrame("EditBox", "RXP12ImportEdit", f)
+  eb:SetMultiLine(true); eb:SetMaxLetters(0); eb:SetAutoFocus(false)
+  eb:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -54)
+  eb:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -16, 42)
+  eb:SetFontObject(ChatFontNormal)
+  eb:SetJustifyH("LEFT"); eb:SetTextInsets(5, 5, 5, 5)
+  eb:SetBackdrop({
+    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile = true, tileSize = 16, edgeSize = 12,
+    insets = { left = 3, right = 3, top = 3, bottom = 3 } })
+  eb:SetBackdropColor(0, 0, 0, 0.7)
+  eb:SetScript("OnEscapePressed", function() this:ClearFocus() end)
+
+  local imp = CreateFrame("Button", "RXP12ImportDo", f, "UIPanelButtonTemplate")
+  imp:SetWidth(100); imp:SetHeight(22)
+  imp:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 14, 12); imp:SetText("Import")
+  imp:SetScript("OnClick", function()
+    local ok, n = pcall(RXP12.ImportGuide, eb:GetText())
+    if ok and n and n > 0 then
+      Print("Imported "..n.." guide(s). Open the cog menu to pick them.")
+      eb:SetText(""); f:Hide(); RXP12.UpdateUI()
+    else
+      Print("|cffff5050Import failed|r -- paste a guide's text or a RegisterGuide([[...]]) block.")
+    end
+  end)
+
+  local clr = CreateFrame("Button", "RXP12ImportClear", f, "UIPanelButtonTemplate")
+  clr:SetWidth(80); clr:SetHeight(22)
+  clr:SetPoint("LEFT", imp, "RIGHT", 8, 0); clr:SetText("Clear")
+  clr:SetScript("OnClick", function() eb:SetText("") end)
+
+  local close = CreateFrame("Button", "RXP12ImportClose", f, "UIPanelCloseButton")
+  close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
+  close:SetScript("OnClick", function() f:Hide() end)
+  f:Hide()
+end
+
+function RXP12.ShowImport()
+  CreateImport()
+  RXP12ImportFrame:Show()
+  if RXP12ImportEdit then RXP12ImportEdit:SetFocus() end
+end
+
 function RXP12.Show() if RXP12Frame then RXP12Frame:Show(); RXP12_Save.shown = true end end
 function RXP12.Hide() if RXP12Frame then RXP12Frame:Hide(); RXP12_Save.shown = false end end
 function RXP12.Toggle()
@@ -1555,6 +1648,9 @@ local function OnEvent()
     RXP12.me.class = string.lower(c or "")
     RXP12.me.race = normalize(UnitRace("player"))
     RXP12.me.faction = string.lower(UnitFactionGroup("player") or "")
+    if RXP12_Save.imports then   -- restore guides imported in earlier sessions
+      for i = 1, table.getn(RXP12_Save.imports) do pcall(RXP12.RegisterGuide, RXP12_Save.imports[i]) end
+    end
     SelectDefaultGuide()
     RXP12.BuildActive()
     CreateUI()
@@ -1589,6 +1685,9 @@ SlashCmdList["RXP12"] = function(msg)
   if cmd == "next" then RXP12.Advance()
   elseif cmd == "prev" or cmd == "back" then RXP12.Back()
   elseif cmd == "options" or cmd == "config" or cmd == "opt" then RXP12.ToggleOptions()
+  elseif cmd == "import" then
+    if arg == "clear" then RXP12_Save.imports = {}; Print("Cleared imported guides -- /reload to apply.")
+    else RXP12.ShowImport() end
   elseif cmd == "auto" then
     RXP12_Save.auto = not RXP12_Save.auto
     if RXP12OptAuto then RXP12OptAuto:SetChecked(RXP12_Save.auto and true or false) end

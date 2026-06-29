@@ -2,11 +2,10 @@
 ## Title: RXP12 |cff33ff99Lean Guide|r
 ## Notes: Lightweight, self-contained leveling-guide engine for the 1.12 client (reads RXPGuides-format guides). By Deso.
 ## Author: Deso
-## Version: 0.22-mvp
+## Version: 0.23-mvp
 ## SavedVariablesPerCharacter: RXP12_Save
 Data\QuestNames.lua
 RXP12.lua
-Guides\Test.lua
 Guides\Classic-Alliance-1-13_Human.lua
 Guides\Classic-Alliance-1-10_NightElf.lua
 Guides\Classic-Alliance-1-14_DwarfGnome.lua
@@ -15,9 +14,6 @@ Guides\Classic-Horde-01-12_Durotar.lua
 Guides\Classic-Horde-1-12_Mulgore.lua
 Guides\Classic-Horde-01-14_Undead.lua
 Guides\Classic-Horde-12-22_Barrens.lua
-Guides\Classic-Alliance-Mage-1-12.lua
-Guides\Classic-Alliance-Mage-12-21.lua
-Guides\Classic-Alliance-ADV-AoE-Mage-1-22.lua
 Guides\Classic-Horde-Mage-12-21.lua
 Guides\Classic-Attunements.lua
 Guides\Classic-0.5.lua

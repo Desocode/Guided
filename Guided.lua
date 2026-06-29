@@ -1059,7 +1059,7 @@ end
 -- live objective progress and a progress bar; other steps are compact one-liners.
 Guided.rows = Guided.rows or {}
 Guided.rowY = Guided.rowY or {}
-local ROW_WIDTH = 316
+local ROW_WIDTH = 286
 local GUTTER = 26                       -- left column for the step-number badge
 local CONTENT_X = GUTTER + 4
 local CONTENT_W = ROW_WIDTH - CONTENT_X - 6
@@ -1893,10 +1893,10 @@ end
 local function CreateUI()
   if GuidedFrame then return end
   local f = CreateFrame("Frame", "GuidedFrame", UIParent)
-  f:SetWidth(340); f:SetHeight(Guided_Save.h or 230)   -- width fixed; height resizable
+  f:SetWidth(310); f:SetHeight(Guided_Save.h or 230)   -- width fixed; height resizable
   f:SetResizable(true)
-  if f.SetMinResize then f:SetMinResize(340, 170) end
-  if f.SetMaxResize then f:SetMaxResize(340, 900) end
+  if f.SetMinResize then f:SetMinResize(310, 170) end
+  if f.SetMaxResize then f:SetMaxResize(310, 900) end
   if Guided_Save.pos then
     f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", Guided_Save.pos.x, Guided_Save.pos.y)
   else

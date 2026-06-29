@@ -48,6 +48,10 @@ local function Sanitize(s)
   s = string.gsub(s, "|cRXP_(%a+)_", function(t)
     return "|c" .. (RXP_COLORS[t] or "ffffffff")
   end)
+  -- guides embed |T<FileDataID>:..|t icons (numeric IDs) that 1.12 cannot render
+  -- (vanilla needs texture PATHS); strip them so they don't show as broken glyphs.
+  -- Path-based |TInterface\..|t icons (start with a letter) are left intact.
+  s = string.gsub(s, "|T%d+[^|]*|t", "")
   return s
 end
 
@@ -115,7 +119,10 @@ local function QuestName(id)
 end
 
 -- ----------------------------------------------------------------- parser ----
--- parse one in-step line into the step table
+-- parse one in-step line into the step table. Besides the engine-facing fields
+-- (step.text / step.gotos / step.quests / step.level), each visible line becomes
+-- an ordered "element" { kind, text, id, obj } so the UI can show a typed icon
+-- per line (accept/turnin/goto/vendor/...) the way RXP does.
 function RXP12.ParseLine(step, t)
   local pre, disp
   local s, e = string.find(t, ">>", 1, true)
@@ -125,29 +132,53 @@ function RXP12.ParseLine(step, t)
   else
     pre = t
   end
-  if disp and disp ~= "" then tinsert(step.text, Sanitize(disp)) end
-  if pre == "" then return end
+  if disp == "" then disp = nil end
+  if disp then tinsert(step.text, Sanitize(disp)) end
 
-  local first = string.sub(pre, 1, 1)
-  if first == "." then
-    local _, _, cmd, rest = string.find(pre, "^%.(%S+)%s*(.*)")
-    if cmd == "goto" then
-      tinsert(step.gotos, rest)
-    elseif cmd == "accept" or cmd == "complete" or cmd == "turnin" then
-      -- RXP form: ".accept <id>", ".turnin <id>", ".complete <id>,<objective>"
-      local _, _, id, obj = string.find(rest, "(%d+),?(%d*)")
-      tinsert(step.quests, { action = cmd, id = tonumber(id), obj = tonumber(obj) })
+  local kind, etext, eid, eobj = nil, disp, nil, nil
+
+  if pre == "" then
+    if disp then kind = "note" end                       -- a plain ">>text" note
+  else
+    local first = string.sub(pre, 1, 1)
+    if first == "." then
+      local _, _, cmd, rest = string.find(pre, "^%.(%S+)%s*(.*)")
+      if cmd == "goto" then
+        tinsert(step.gotos, rest)
+        kind = "goto"; etext = disp or ("Go to "..rest)
+      elseif cmd == "accept" or cmd == "complete" or cmd == "turnin" then
+        -- RXP form: ".accept <id>", ".turnin <id>", ".complete <id>,<objective>"
+        local _, _, id, obj = string.find(rest, "(%d+),?(%d*)")
+        eid = tonumber(id); eobj = tonumber(obj)
+        tinsert(step.quests, { action = cmd, id = eid, obj = eobj })
+        kind = cmd
+        if not etext then
+          local nm = QuestName(eid)
+          local verb = (cmd == "accept" and "Accept") or (cmd == "turnin" and "Turn in") or "Complete"
+          etext = verb..(nm and (": "..nm) or (" quest "..(eid or "?")))
+        end
+      elseif cmd == "fp" or cmd == "getfp" then kind = "fp"; etext = disp or "Get the flight point"
+      elseif cmd == "fly" or cmd == "taxi" then kind = "fly"; etext = disp or ("Fly to "..rest)
+      elseif cmd == "vendor" or cmd == "buy" then kind = "vendor"; etext = disp or (rest ~= "" and rest) or "Vendor"
+      elseif cmd == "train" or cmd == "trainer" then kind = "train"; etext = disp or "Train your spells"
+      elseif cmd == "hearth" or cmd == "sethearth" or cmd == "home" then kind = "hearth"; etext = disp or "Hearthstone"
+      elseif disp then kind = "note"; etext = disp        -- any other command, show its text only
+      end
+    elseif first == "#" then
+      local _, _, key, val = string.find(pre, "^#(%S+)%s*(.*)")
+      if key == "level" then
+        step.level = tonumber(val); kind = "level"; etext = disp or ("Reach level "..(val or "?"))
+      elseif key then
+        step[key] = (val ~= "" and val) or true
+      end
+    elseif first == "+" then
+      kind = "note"; etext = string.sub(pre, 2)
+      tinsert(step.text, Sanitize(etext))
     end
-    -- other dot-commands ignored in the MVP
-  elseif first == "#" then
-    local _, _, key, val = string.find(pre, "^#(%S+)%s*(.*)")
-    if key == "level" then
-      step.level = tonumber(val)
-    elseif key then
-      step[key] = (val ~= "" and val) or true
-    end
-  elseif first == "+" then
-    tinsert(step.text, Sanitize(string.sub(pre, 2)))
+  end
+
+  if kind and etext and etext ~= "" then
+    tinsert(step.elements, { kind = kind, text = Sanitize(etext), id = eid, obj = eobj })
   end
 end
 
@@ -159,7 +190,7 @@ function RXP12.Parse(text)
     local t = trim(line)
     if t ~= "" then
       if string.find(t, "^step") then
-        step = { text = {}, gotos = {}, quests = {}, level = nil, cond = nil }
+        step = { text = {}, gotos = {}, quests = {}, elements = {}, level = nil, cond = nil }
         local _, _, cond = string.find(t, "^step%s*<<%s*(.*)")
         if cond and cond ~= "" then step.cond = cond end
         tinsert(guide.steps, step)
@@ -581,70 +612,275 @@ local function ObjectiveLines(step)
 end
 
 -- ---------------------------------------------------------------------- UI ----
--- RXP shows a scrolling LIST of steps with the current one highlighted, not a
--- single-step panel. We mirror that: one pooled row per active step in a
--- ScrollFrame -- current step highlighted, done steps dimmed, pinned stickies
--- marked, click a row to jump to it, and the list auto-scrolls to the active step.
+-- RXP-style scrolling step list. Each step is a "card": a numbered badge in the
+-- left gutter + content on the right. Each content line carries a typed inline
+-- icon (accept/turnin/goto/vendor/...). The current step is expanded into one
+-- checkbox row per element (tick to mark done; all ticked -> auto-advance) plus
+-- live objective progress and a progress bar; other steps are compact one-liners.
 RXP12.rows = RXP12.rows or {}
 RXP12.rowY = RXP12.rowY or {}
-local ROW_WIDTH = 310
+local ROW_WIDTH = 312
+local GUTTER = 26                       -- left column for the step-number badge
+local CONTENT_X = GUTTER + 4
+local CONTENT_W = ROW_WIDTH - CONTENT_X - 6
 
--- measure a wrapped FontString's height. 1.12 FontStrings have NO GetStringHeight
--- (added in a later client) -- use GetHeight (auto-fits a width-constrained,
--- single-anchored FontString); fall back to a line-count estimate if it's 0.
+-- typed inline icons -- all stock 1.12 textures, rendered via |Tpath:size|t
+local KIND_ICON = {
+  accept   = "Interface\\GossipFrame\\AvailableQuestIcon",
+  turnin   = "Interface\\GossipFrame\\ActiveQuestIcon",
+  complete = "Interface\\GossipFrame\\BattleMasterGossipIcon",
+  goto     = "Interface\\Minimap\\MinimapArrow",
+  vendor   = "Interface\\GossipFrame\\VendorGossipIcon",
+  fp       = "Interface\\GossipFrame\\TaxiGossipIcon",
+  fly      = "Interface\\GossipFrame\\TaxiGossipIcon",
+  train    = "Interface\\GossipFrame\\TrainerGossipIcon",
+  hearth   = "Interface\\Icons\\INV_Misc_Rune_01",
+}
+local function ElementLine(el)
+  local p = KIND_ICON[el.kind]
+  local pre = p and ("|T"..p..":13|t ") or ""
+  if el.kind == "level" then return pre.."|cff88ccff"..(el.text or "").."|r" end
+  return pre..(el.text or "")
+end
+
+-- class icon coords on the stock character-create class sheet
+local CLASS_TC = {
+  WARRIOR={0,0.25,0,0.25},   MAGE={0.25,0.5,0,0.25},   ROGUE={0.5,0.75,0,0.25}, DRUID={0.75,1,0,0.25},
+  HUNTER={0,0.25,0.25,0.5},  SHAMAN={0.25,0.5,0.25,0.5}, PRIEST={0.5,0.75,0.25,0.5}, WARLOCK={0.75,1,0.25,0.5},
+  PALADIN={0,0.25,0.5,0.75},
+}
+
+-- measure a wrapped FontString's height (1.12 has no GetStringHeight)
 local function FSHeight(fs)
-  if fs.GetStringHeight then
-    local h = fs:GetStringHeight()
-    if h and h > 0 then return h end
-  end
-  local h = fs:GetHeight()
-  if h and h > 0 then return h end
+  if fs.GetStringHeight then local h = fs:GetStringHeight(); if h and h > 0 then return h end end
+  local h = fs:GetHeight(); if h and h > 0 then return h end
   local _, breaks = string.gsub(fs:GetText() or "", "\n", "")
   return (breaks + 1) * 12
 end
 
--- assemble a step's display text. Only the current step pays for a quest-log
--- scan (objective progress); other rows stay cheap to render.
-local function StepBodyText(step, isCurrent)
-  local lines = {}
-  for k = 1, table.getn(step.text) do tinsert(lines, step.text[k]) end
-  if isCurrent then
-    local ok, objl = pcall(ObjectiveLines, step)
-    if ok and objl then for k = 1, table.getn(objl) do tinsert(lines, objl[k]) end end
+-- overall objective progress for a step (done, total) read from the quest log
+local function ObjectiveProgress(step)
+  local done, total = 0, 0
+  if not step or table.getn(step.quests) == 0 then return 0, 0 end
+  local sel = GetQuestLogSelection()
+  local n = GetNumQuestLogEntries()
+  for k = 1, table.getn(step.quests) do
+    local q = step.quests[k]
+    local nm = QuestName(q.id)
+    if nm and (q.action == "complete" or q.action == "accept") then
+      nm = lc(nm)
+      for i = 1, n do
+        local title, _, _, isHeader = GetQuestLogTitle(i)
+        if title and not isHeader and lc(title) == nm then
+          SelectQuestLogEntry(i)
+          for j = 1, GetNumQuestLeaderBoards() do
+            if (not q.obj) or j == q.obj then
+              local _, _, d = GetQuestLogLeaderBoard(j)
+              total = total + 1; if d then done = done + 1 end
+            end
+          end
+          break
+        end
+      end
+    end
   end
-  for k = 1, table.getn(step.gotos) do
-    tinsert(lines, "|cffffd200> "..step.gotos[k].."|r")
+  if sel then SelectQuestLogEntry(sel) end
+  return done, total
+end
+
+-- a per-element checkbox row (used only for the current step's expanded card)
+local function GetElemRow(r, j)
+  r.elems = r.elems or {}
+  if r.elems[j] then return r.elems[j] end
+  local er = CreateFrame("Button", nil, r)
+  er.check = CreateFrame("CheckButton", nil, er, "UICheckButtonTemplate")
+  er.check:SetWidth(18); er.check:SetHeight(18)
+  er.check:SetPoint("TOPLEFT", er, "TOPLEFT", 0, 0)
+  er.fs = er:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+  er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", 22, -2)
+  er.fs:SetWidth(CONTENT_W - 22)
+  er.fs:SetJustifyH("LEFT"); er.fs:SetJustifyV("TOP")
+  er:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+  local function toggle()
+    local el = er.element
+    if el then el.checked = er.check:GetChecked() and true or false end
+    if r.onToggle then r.onToggle() end
   end
-  if step.level then tinsert(lines, "|cff88ccff> Reach level "..step.level.."|r") end
-  local body = table.concat(lines, "\n")
-  if body == "" then body = "|cff888888(no description)|r" end
-  return body
+  er._onclick = function() er.check:SetChecked(not er.check:GetChecked()); toggle() end
+  er.check:SetScript("OnClick", toggle)
+  er:SetScript("OnClick", er._onclick)
+  er:SetScript("OnEnter", function()
+    if er.tip then GameTooltip:SetOwner(er, "ANCHOR_RIGHT"); GameTooltip:SetText(er.tip, 1, 1, 1, 1, 1); GameTooltip:Show() end
+  end)
+  er:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  r.elems[j] = er
+  return er
 end
 
 local function GetRow(i)
   if RXP12.rows[i] then return RXP12.rows[i] end
   local r = CreateFrame("Button", "RXP12Row"..i, RXP12ScrollChild)
   r:SetWidth(ROW_WIDTH)
-  r.bg = r:CreateTexture(nil, "BACKGROUND")
-  r.bg:SetAllPoints()
-  r.bg:SetTexture(0.20, 0.45, 0.85, 0.30)   -- current-step highlight
-  r.bg:Hide()
-  r:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
-  local hl = r:GetHighlightTexture(); if hl then hl:SetVertexColor(1, 1, 1, 0.12) end
+  r.bg = r:CreateTexture(nil, "BACKGROUND"); r.bg:SetAllPoints(); r.bg:Hide()
+  r.accent = r:CreateTexture(nil, "BORDER")          -- left accent bar
+  r.accent:SetPoint("TOPLEFT", r, "TOPLEFT", 0, 0)
+  r.accent:SetPoint("BOTTOMLEFT", r, "BOTTOMLEFT", 0, 0)
+  r.accent:SetWidth(3); r.accent:Hide()
+  r.sep = r:CreateTexture(nil, "ARTWORK")            -- bottom separator
+  r.sep:SetPoint("BOTTOMLEFT", r, "BOTTOMLEFT", CONTENT_X, 0)
+  r.sep:SetPoint("BOTTOMRIGHT", r, "BOTTOMRIGHT", -4, 0)
+  r.sep:SetHeight(1); r.sep:SetTexture(1, 1, 1, 0.07)
+  -- numbered badge chip
+  r.badgeBg = r:CreateTexture(nil, "BORDER")
+  r.badgeBg:SetPoint("TOPLEFT", r, "TOPLEFT", 4, -4)
+  r.badgeBg:SetWidth(GUTTER - 6); r.badgeBg:SetHeight(16)
+  r.badgeBg:SetTexture(0.25, 0.25, 0.3, 0.7)
+  r.num = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  r.num:SetPoint("CENTER", r.badgeBg, "CENTER", 0, 0)
+  r.check = r:CreateTexture(nil, "OVERLAY")           -- done check over the badge
+  r.check:SetAllPoints(r.badgeBg)
+  r.check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+  r.check:Hide()
+  -- compact body (non-current steps)
   r.fs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  r.fs:SetPoint("TOPLEFT", r, "TOPLEFT", 6, -3)
-  r.fs:SetWidth(ROW_WIDTH - 12)
+  r.fs:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -4)
+  r.fs:SetWidth(CONTENT_W)
   r.fs:SetJustifyH("LEFT"); r.fs:SetJustifyV("TOP")
+  -- progress bar (current step)
+  r.bar = CreateFrame("StatusBar", nil, r)
+  r.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+  r.bar:SetStatusBarColor(0.2, 0.7, 0.2)
+  r.bar:SetHeight(6); r.bar:SetMinMaxValues(0, 1)
+  r.bar.bg = r.bar:CreateTexture(nil, "BACKGROUND"); r.bar.bg:SetAllPoints(); r.bar.bg:SetTexture(0, 0, 0, 0.5)
+  r.bar:Hide()
+  r:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
+  local hl = r:GetHighlightTexture(); if hl then hl:SetVertexColor(1, 1, 1, 0.08) end
   r:SetScript("OnClick", function() if this.stepIndex then RXP12.SetStep(this.stepIndex) end end)
+  r:SetScript("OnEnter", function()
+    if this.tip then GameTooltip:SetOwner(this, "ANCHOR_RIGHT"); GameTooltip:SetText(this.tip, 1, 1, 1, 1, 1); GameTooltip:Show() end
+  end)
+  r:SetScript("OnLeave", function() GameTooltip:Hide() end)
   RXP12.rows[i] = r
   return r
+end
+
+-- lay out one step's row; returns its height. mode: current renders the expanded
+-- checkbox card, others render the compact line.
+local function RenderRow(r, step, i, cur)
+  local active = RXP12.activeStickies and RXP12.activeStickies[i]
+  local isCur = (i == cur)
+  r.stepIndex = i
+
+  -- badge + status styling
+  r.num:SetText(tostring(i))
+  if isCur then
+    r.bg:Show(); r.bg:SetTexture(0.16, 0.42, 0.85, 0.30)
+    r.accent:Show(); r.accent:SetTexture(0.3, 1, 0.3, 0.9)
+    r.check:Hide(); r.num:Show()
+  elseif active then
+    r.bg:Show(); r.bg:SetTexture(0.85, 0.7, 0.1, 0.14)
+    r.accent:Show(); r.accent:SetTexture(1, 0.8, 0.1, 0.9)
+    r.check:Hide(); r.num:Show()
+  else
+    r.bg:Hide(); r.accent:Hide()
+    if i < cur then r.check:Show(); r.num:Hide() else r.check:Hide(); r.num:Show() end
+  end
+  local dim = (i < cur and not active)
+  r.num:SetAlpha(dim and 0.5 or 1)
+
+  local h
+  if isCur then
+    -- expanded: one checkbox row per element + objective lines + progress bar
+    r.fs:Hide()
+    local y = 2
+    local els = step.elements or {}
+    local nEls = table.getn(els)
+    for j = 1, nEls do
+      local el = els[j]
+      local er = GetElemRow(r, j)
+      er.element = el
+      er.tip = el.text
+      er.check:Show()
+      er:SetScript("OnClick", er._onclick)
+      er.fs:ClearAllPoints(); er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", 22, -2); er.fs:SetWidth(CONTENT_W - 22)
+      er.fs:SetText(ElementLine(el))
+      er.check:SetChecked(el.checked and true or false)
+      local eh = FSHeight(er.fs); if eh < 18 then eh = 18 end
+      er:SetWidth(CONTENT_W); er:SetHeight(eh)
+      er:ClearAllPoints(); er:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
+      er:Show()
+      y = y + eh + 3
+    end
+    -- objective progress text lines (no checkbox)
+    local ok, objl = pcall(ObjectiveLines, step)
+    if ok and objl and table.getn(objl) > 0 then
+      local j = nEls + 1
+      local er = GetElemRow(r, j); er.element = nil; er.tip = nil
+      er.check:Hide()
+      er:SetScript("OnClick", nil)
+      er.fs:ClearAllPoints(); er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", 4, -2); er.fs:SetWidth(CONTENT_W - 4)
+      er.fs:SetText(table.concat(objl, "\n"))
+      local eh = FSHeight(er.fs); if eh < 12 then eh = 12 end
+      er:SetWidth(CONTENT_W); er:SetHeight(eh)
+      er:ClearAllPoints(); er:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
+      er:Show()
+      y = y + eh + 3
+      r.objRow = j
+    else
+      r.objRow = nil
+    end
+    -- hide leftover element rows
+    local hideFrom = nEls + 1 + (r.objRow and 1 or 0)
+    if r.elems then
+      local k = hideFrom
+      while r.elems[k] do r.elems[k]:Hide(); k = k + 1 end
+    end
+    -- progress bar
+    local done, total = ObjectiveProgress(step)
+    if total > 0 then
+      r.bar:ClearAllPoints()
+      r.bar:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
+      r.bar:SetWidth(CONTENT_W)
+      r.bar:SetValue(done / total)
+      r.bar:Show()
+      y = y + 9
+    else
+      r.bar:Hide()
+    end
+    -- auto-advance when every element is ticked
+    r.onToggle = function()
+      for k = 1, table.getn(step.elements or {}) do
+        if not step.elements[k].checked then return end
+      end
+      if table.getn(step.elements or {}) > 0 then RXP12.Advance() end
+    end
+    h = y + 4
+  else
+    -- compact: hide expansion, single icon-line body
+    r.bar:Hide()
+    if r.elems then local k = 1; while r.elems[k] do r.elems[k]:Hide(); k = k + 1 end end
+    local lines = {}
+    for j = 1, table.getn(step.elements or {}) do tinsert(lines, ElementLine(step.elements[j])) end
+    local body = table.concat(lines, "\n")
+    if body == "" then body = "|cff777777(no description)|r" end
+    r.fs:SetText(body)
+    r.fs:SetAlpha(dim and 0.5 or 1)
+    r.fs:Show()
+    h = FSHeight(r.fs) + 8
+  end
+
+  -- tooltip on the whole row = first goto coords / hint
+  r.tip = (step.gotos and step.gotos[1]) and ("Go to: "..step.gotos[1]) or "Click to jump to this step"
+  if h < 20 then h = 20 end
+  r:SetHeight(h); r:SetWidth(ROW_WIDTH)
+  return h
 end
 
 function RXP12.ScrollToStep(cur)
   if not RXP12ScrollFrame then return end
   local maxScroll = RXP12ScrollChild:GetHeight() - RXP12ScrollFrame:GetHeight()
   if maxScroll < 0 then maxScroll = 0 end
-  local target = (RXP12.rowY[cur] or 0) - 24      -- keep a little context above
+  local target = (RXP12.rowY[cur] or 0) - 24
   if target < 0 then target = 0 end
   if target > maxScroll then target = maxScroll end
   RXP12ScrollFrame:SetVerticalScroll(target)
@@ -654,7 +890,7 @@ function RXP12.WheelScroll(dir)
   if not RXP12ScrollFrame then return end
   local maxScroll = RXP12ScrollChild:GetHeight() - RXP12ScrollFrame:GetHeight()
   if maxScroll < 0 then maxScroll = 0 end
-  local v = RXP12ScrollFrame:GetVerticalScroll() - (dir or 0) * 32
+  local v = RXP12ScrollFrame:GetVerticalScroll() - (dir or 0) * 36
   if v < 0 then v = 0 end
   if v > maxScroll then v = maxScroll end
   RXP12ScrollFrame:SetVerticalScroll(v)
@@ -666,7 +902,10 @@ function RXP12.UpdateUI()
   if not g or not RXP12.active then
     getglobal("RXP12FrameTitle"):SetText("RXP12 -- no guide")
     getglobal("RXP12FrameCounter"):SetText("")
-    local r = GetRow(1); r.stepIndex = nil; r.bg:Hide(); r.fs:SetAlpha(1)
+    if RXP12FrameClassIcon then RXP12FrameClassIcon:Hide() end
+    local r = GetRow(1); r.stepIndex = nil; r.bg:Hide(); r.accent:Hide(); r.num:Hide(); r.check:Hide(); r.bar:Hide()
+    if r.elems then local k=1; while r.elems[k] do r.elems[k]:Hide(); k=k+1 end end
+    r.fs:Show(); r.fs:SetAlpha(1)
     r.fs:SetText("No guide loaded.\nType |cffffd200/rxp12 list|r, then |cffffd200/rxp12 load <name>|r")
     r:SetHeight(FSHeight(r.fs) + 8); r:SetWidth(ROW_WIDTH)
     r:ClearAllPoints(); r:SetPoint("TOPLEFT", RXP12ScrollChild, "TOPLEFT", 0, 0); r:Show()
@@ -680,25 +919,19 @@ function RXP12.UpdateUI()
   local cur = RXP12_Save.step or 1
   getglobal("RXP12FrameCounter"):SetText(cur.." / "..n)
 
+  -- header class icon
+  if RXP12FrameClassIcon then
+    local tc = CLASS_TC[PLAYER_CLASS or ""]
+    if tc then
+      RXP12FrameClassIcon:SetTexCoord(tc[1], tc[2], tc[3], tc[4]); RXP12FrameClassIcon:Show()
+    else RXP12FrameClassIcon:Hide() end
+  end
+
   RXP12.rowY = {}
   local y = 0
   for i = 1, n do
-    local step = RXP12.active[i]
     local r = GetRow(i)
-    r.stepIndex = i
-
-    local marker
-    local active = RXP12.activeStickies and RXP12.activeStickies[i]
-    if i == cur then marker = "|cff33ff33> |r"; r.bg:Show()
-    elseif active then marker = "|cffffcc00* |r"; r.bg:Hide()
-    else marker = "|cffaaaaaa- |r"; r.bg:Hide() end
-
-    r.fs:SetText(marker .. StepBodyText(step, i == cur))
-    if i < cur and not active then r.fs:SetAlpha(0.45) else r.fs:SetAlpha(1) end
-
-    local h = FSHeight(r.fs) + 6
-    if h < 16 then h = 16 end
-    r:SetHeight(h); r:SetWidth(ROW_WIDTH)
+    local h = RenderRow(r, RXP12.active[i], i, cur)
     r:ClearAllPoints()
     r:SetPoint("TOPLEFT", RXP12ScrollChild, "TOPLEFT", 0, -y)
     r:Show()
@@ -717,7 +950,7 @@ end
 local function CreateUI()
   if RXP12Frame then return end
   local f = CreateFrame("Frame", "RXP12Frame", UIParent)
-  f:SetWidth(340); f:SetHeight(320)
+  f:SetWidth(340); f:SetHeight(340)
   if RXP12_Save.pos then
     f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", RXP12_Save.pos.x, RXP12_Save.pos.y)
   else
@@ -728,7 +961,7 @@ local function CreateUI()
     edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
     tile = true, tileSize = 16, edgeSize = 16,
     insets = { left = 4, right = 4, top = 4, bottom = 4 } })
-  f:SetBackdropColor(0, 0, 0, 0.85)
+  f:SetBackdropColor(0.05, 0.05, 0.07, 0.92)
   f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
   f:SetScript("OnDragStart", function() if not RXP12_Save.locked then this:StartMoving() end end)
   f:SetScript("OnDragStop", function()
@@ -736,20 +969,32 @@ local function CreateUI()
     RXP12_Save.pos = { x = this:GetLeft(), y = this:GetTop() }
   end)
 
+  -- header: class icon + guide name + counter, with a divider line
+  local cicon = f:CreateTexture("RXP12FrameClassIcon", "OVERLAY")
+  cicon:SetWidth(18); cicon:SetHeight(18)
+  cicon:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -8)
+  cicon:SetTexture("Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes")
+  cicon:Hide()
+
   local title = f:CreateFontString("RXP12FrameTitle", "OVERLAY", "GameFontNormal")
-  title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
+  title:SetPoint("LEFT", cicon, "RIGHT", 6, 0)
   title:SetText("RXP12")
 
   local counter = f:CreateFontString("RXP12FrameCounter", "OVERLAY", "GameFontHighlightSmall")
   counter:SetPoint("TOPRIGHT", f, "TOPRIGHT", -28, -12)
 
+  local divider = f:CreateTexture(nil, "ARTWORK")
+  divider:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -30)
+  divider:SetPoint("TOPRIGHT", f, "TOPRIGHT", -10, -30)
+  divider:SetHeight(1); divider:SetTexture(1, 1, 1, 0.15)
+
   -- scrolling step list
   local sf = CreateFrame("ScrollFrame", "RXP12ScrollFrame", f)
-  sf:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -30)
-  sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 34)
-  local child = CreateFrame("Frame", "RXP12ScrollChild", sf)
-  child:SetWidth(ROW_WIDTH); child:SetHeight(1)
-  sf:SetScrollChild(child)
+  sf:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -34)
+  sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 34)
+  local cchild = CreateFrame("Frame", "RXP12ScrollChild", sf)
+  cchild:SetWidth(ROW_WIDTH); cchild:SetHeight(1)
+  sf:SetScrollChild(cchild)
   sf:EnableMouseWheel(true)
   sf:SetScript("OnMouseWheel", function() RXP12.WheelScroll(arg1) end)
 

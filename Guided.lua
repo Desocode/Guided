@@ -623,8 +623,8 @@ local function GetMapPin(i)
   f:SetWidth(18); f:SetHeight(18)
   local bg = f:CreateTexture(nil, "BACKGROUND")
   bg:SetAllPoints(f)
-  bg:SetTexture("Interface\\Buttons\\WHITE8X8")   -- reliable solid backing
-  bg:SetVertexColor(0, 0, 0); bg:SetAlpha(0.25)   -- a little background, very low opacity
+  bg:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")   -- filled circle
+  bg:SetVertexColor(0, 0, 0); bg:SetAlpha(0.3)    -- faint circular backing, very low opacity
   f.bg = bg
   local num = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   num:SetPoint("CENTER", f, "CENTER", 0, 0); num:SetTextColor(1, 1, 1)

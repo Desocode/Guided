@@ -97,6 +97,9 @@ function RXP12.EvalCondition(cond)
   return true
 end
 
+-- a per-line "<< cond" passes if absent, or its condition matches this character
+local function CondOK(c) return (not c) or RXP12.EvalCondition(c) end
+
 -- build the list of steps that apply to this character (after << filtering)
 function RXP12.BuildActive()
   RXP12.active = {}
@@ -129,6 +132,16 @@ end
 -- an ordered "element" { kind, text, id, obj } so the UI can show a typed icon
 -- per line (accept/turnin/goto/vendor/...) the way RXP does.
 function RXP12.ParseLine(step, t)
+  -- a trailing "<< cond" applies that condition to THIS line only (per-line filter,
+  -- e.g. ">>train Battle Shout << Warrior"). Evaluated per-character at use time,
+  -- not at parse time (player identity is set only after guides load). Strip it here.
+  local lineCond
+  local cp = string.find(t, "<<", 1, true)
+  if cp then
+    lineCond = trim(string.sub(t, cp + 2))
+    t = trim(string.sub(t, 1, cp - 1))
+    if lineCond == "" then lineCond = nil end
+  end
   local pre, disp
   local s, e = string.find(t, ">>", 1, true)
   if s then
@@ -155,7 +168,7 @@ function RXP12.ParseLine(step, t)
         -- RXP form: ".accept <id>", ".turnin <id>", ".complete <id>,<objective>"
         local _, _, id, obj = string.find(rest, "(%d+),?(%d*)")
         eid = tonumber(id); eobj = tonumber(obj)
-        tinsert(step.quests, { action = cmd, id = eid, obj = eobj })
+        tinsert(step.quests, { action = cmd, id = eid, obj = eobj, cond = lineCond })
         kind = cmd
         if not etext then
           local nm = QuestName(eid)
@@ -183,7 +196,7 @@ function RXP12.ParseLine(step, t)
   end
 
   if kind and etext and etext ~= "" then
-    tinsert(step.elements, { kind = kind, text = Sanitize(etext), id = eid, obj = eobj })
+    tinsert(step.elements, { kind = kind, text = Sanitize(etext), id = eid, obj = eobj, cond = lineCond })
   end
 end
 
@@ -431,23 +444,28 @@ function RXP12.IsStepDone(step, log)
   if step.level and UnitLevel("player") >= step.level then return true end
   if table.getn(step.quests) == 0 then return false end
   if not log then return false end
+  local any = false
   for k = 1, table.getn(step.quests) do
     local q = step.quests[k]
-    local nm = QuestName(q.id)
-    if not nm then return false end                          -- id not in DB -> can't auto-track
-    local key = lc(nm)
-    local entry = log[key]
-    if q.action == "accept" then
-      if not entry then return false end                     -- quest not in log yet
-    elseif q.action == "complete" then
-      if not entry then return false                         -- not even accepted
-      elseif q.obj then
-        if not ObjectiveDone(entry.idx, q.obj) then return false end -- objective not done
-      elseif not entry.complete then return false end         -- whole quest not complete
-    elseif q.action == "turnin" then
-      if not (RXP12.seen[key] and not entry) then return false end -- seen, now gone = turned in
+    if CondOK(q.cond) then                                    -- per-line "<< cond" gate
+      any = true
+      local nm = QuestName(q.id)
+      if not nm then return false end                        -- id not in DB -> can't auto-track
+      local key = lc(nm)
+      local entry = log[key]
+      if q.action == "accept" then
+        if not entry then return false end                   -- quest not in log yet
+      elseif q.action == "complete" then
+        if not entry then return false                       -- not even accepted
+        elseif q.obj then
+          if not ObjectiveDone(entry.idx, q.obj) then return false end -- objective not done
+        elseif not entry.complete then return false end       -- whole quest not complete
+      elseif q.action == "turnin" then
+        if not (RXP12.seen[key] and not entry) then return false end -- seen, now gone = turned in
+      end
     end
   end
+  if not any then return false end                            -- no applicable quest -> manual step
   return true
 end
 
@@ -532,7 +550,7 @@ function RXP12.WantedQuests()
     if s and s.quests then
       for k = 1, table.getn(s.quests) do
         local q = s.quests[k]
-        local nm = QuestName(q.id)
+        local nm = CondOK(q.cond) and QuestName(q.id)
         if nm then
           if q.action == "accept" then accept[lc(nm)] = true
           elseif q.action == "turnin" then turnin[lc(nm)] = true end
@@ -543,25 +561,25 @@ function RXP12.WantedQuests()
   return accept, turnin
 end
 
--- read a vanilla gossip quest list (active or available) as a plain title array.
--- The return stride differs by client (1.12 vs Era), so derive it from the data:
--- total returns / count; the quest title is always the first field of each group.
-local function GossipTitles(getter, num)
+-- vanilla 1.12 has NO GetNumGossip*Quests (those came in 2.0) -- calling them
+-- ERRORS on a 1.12/Turtle client. GetGossipAvailableQuests/GetGossipActiveQuests
+-- return a flat list where each quest's group begins with its title STRING (level
+-- etc. are numbers/booleans). Collect the strings in order: the k-th title is
+-- gossip quest index k -- so we need neither a count function nor the stride.
+local function GossipQuestList(getter)
   local out = {}
-  if not getter or not num or num == 0 then return out end
+  if type(getter) ~= "function" then return out end
   local all = { getter() }
-  local total = table.getn(all)
-  if total == 0 then return out end
-  local stride = math.floor(total / num)
-  if stride < 1 then stride = 1 end
-  for i = 1, num do out[i] = all[(i - 1) * stride + 1] end
+  for i = 1, table.getn(all) do
+    if type(all[i]) == "string" and all[i] ~= "" then tinsert(out, all[i]) end
+  end
   return out
 end
 
 -- handle a quest/gossip frame event when auto mode is on. pcall'd by caller.
 function RXP12.HandleQuestEvent(e)
   if RXP12.debug then
-    local na = (GetNumGossipAvailableQuests and GetNumGossipAvailableQuests()) or "?"
+    local na = table.getn(GossipQuestList(GetGossipAvailableQuests))
     Print("|cff88ccff[dbg]|r "..e.." auto="..tostring(RXP12_Save and RXP12_Save.auto)
       .." title='"..tostring((GetTitleText and GetTitleText()) or "").."' gossipAvail="..tostring(na))
   end
@@ -596,13 +614,13 @@ function RXP12.HandleQuestEvent(e)
     end
 
   elseif e == "GOSSIP_SHOW" then
-    local titles = GossipTitles(GetGossipActiveQuests, GetNumGossipActiveQuests())
-    for i = 1, table.getn(titles) do
-      if turnin[lc(titles[i])] then SelectGossipActiveQuest(i); return end
+    local act = GossipQuestList(GetGossipActiveQuests)
+    for i = 1, table.getn(act) do
+      if turnin[lc(act[i])] then SelectGossipActiveQuest(i); return end
     end
-    titles = GossipTitles(GetGossipAvailableQuests, GetNumGossipAvailableQuests())
-    for i = 1, table.getn(titles) do
-      if accept[lc(titles[i])] then SelectGossipAvailableQuest(i); return end
+    local av = GossipQuestList(GetGossipAvailableQuests)
+    for i = 1, table.getn(av) do
+      if accept[lc(av[i])] then SelectGossipAvailableQuest(i); return end
     end
   end
 end
@@ -617,7 +635,7 @@ local function ObjectiveLines(step)
   local total = GetNumQuestLogEntries()
   for k = 1, table.getn(step.quests) do
     local q = step.quests[k]
-    if q.action == "complete" or q.action == "accept" then
+    if CondOK(q.cond) and (q.action == "complete" or q.action == "accept") then
       local want = QuestName(q.id)
       if want then
         want = lc(want)
@@ -699,7 +717,7 @@ local function ObjectiveProgress(step)
   local n = GetNumQuestLogEntries()
   for k = 1, table.getn(step.quests) do
     local q = step.quests[k]
-    local nm = QuestName(q.id)
+    local nm = CondOK(q.cond) and QuestName(q.id)
     if nm and (q.action == "complete" or q.action == "accept") then
       nm = lc(nm)
       for i = 1, n do

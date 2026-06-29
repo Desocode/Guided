@@ -3056,6 +3056,10 @@ end)
 local origAbandonQuest = AbandonQuest
 function AbandonQuest()
   local nm = GetAbandonQuestName and GetAbandonQuestName()
+  if (not nm or nm == "") and GetQuestLogSelection and GetQuestLogTitle then
+    local sel = GetQuestLogSelection()                 -- fall back to the selected quest
+    if sel and sel > 0 then nm = GetQuestLogTitle(sel) end
+  end
   if nm and nm ~= "" and Guided.active then
     local key = lc(nm)
     Guided.seen[key] = nil                                   -- so the vanish isn't a "hand-in"

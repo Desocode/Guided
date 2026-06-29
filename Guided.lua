@@ -198,6 +198,10 @@ local function GroupCheck(step)
   end
   return true
 end
+local function StepClientOK(step)
+  if step.som or step.phase then return false end   -- SoM / SoD-phase content: hidden on vanilla Era
+  return true
+end
 
 function Guided.BuildActive()
   Guided.active = {}
@@ -215,7 +219,7 @@ function Guided.BuildActive()
     if st.dungeonskip and not seenD[st.dungeonskip] then seenD[st.dungeonskip] = true; tinsert(Guided.dungeonCodes, st.dungeonskip) end
     if Guided.EvalCondition(st.cond) and Guided.DungeonCheck(st)
         and (not st.maxlevel or UnitLevel("player") <= st.maxlevel)
-        and Guided.SkillCheck(st) and SeasonOK(st) and XpRateOK(st) and ModeOK(st) and GroupCheck(st) then
+        and Guided.SkillCheck(st) and SeasonOK(st) and XpRateOK(st) and ModeOK(st) and GroupCheck(st) and StepClientOK(st) then
       tinsert(Guided.active, st)
       local s = Guided.active[table.getn(Guided.active)]
       if s.label and s.label ~= true then Guided.labelIndex[s.label] = table.getn(Guided.active) end
@@ -311,7 +315,7 @@ function Guided.ParseLine(step, t)
         step.fly = step.fly or trim(rest)   -- destination name for auto-taxi
       elseif cmd == "vendor" or cmd == "buy" then kind = "vendor"; etext = disp or (rest ~= "" and rest) or "Vendor"
       elseif cmd == "train" or cmd == "trainer" then kind = "train"; etext = disp or "Train your spells"
-      elseif cmd == "hearth" or cmd == "sethearth" or cmd == "home" then kind = "hearth"; etext = disp or "Hearthstone"
+      elseif cmd == "hearth" or cmd == "sethearth" or cmd == "home" or cmd == "hs" then kind = "hearth"; etext = disp or "Hearthstone"
       elseif cmd == "xp" then
         -- RXP ".xp [<]level[+/-xp][,skipstep]": a level/xp gate (see functions.xp).
         -- When satisfied the step is treated done and hidden (bypassed), like RXP.
@@ -374,6 +378,25 @@ function Guided.ParseLine(step, t)
           if not dup then tinsert(step.targets, nm) end
           step.target = step.target or nm
         end
+      elseif cmd == "timer" then
+        -- ".timer <minutes>,<label>": author countdown, shown while the step is active
+        local _, _, mins, lbl = string.find(rest, "([0-9.]+)%s*,?%s*(.*)")
+        mins = tonumber(mins)
+        if mins then step.timer = { secs = mins * 60, label = (lbl and lbl ~= "" and lbl) or "Timer" } end
+        if disp then kind = "note"; etext = disp end
+      elseif cmd == "equip" then
+        -- ".equip <slot>[,<itemId>]": route a known item id through the Use button so it
+        -- can be equipped (UseContainerItem equips equippable items, like right-clicking).
+        local _, _, eid = string.find(rest, "%d+%s*,%s*(%d+)")
+        eid = tonumber(eid)
+        if eid then
+          step.useitems = step.useitems or {}
+          local dup = false
+          for k = 1, table.getn(step.useitems) do if step.useitems[k] == eid then dup = true; break end end
+          if not dup then tinsert(step.useitems, eid) end
+          step.useitem = step.useitem or eid
+        end
+        if disp then kind = "note"; etext = disp end
       elseif cmd == "group" then
         -- ".group [N] [<<cond]": this step is meant for a party. Gated by the
         -- "Enable group quests" setting; its paired ".solo" step shows when off.
@@ -390,7 +413,8 @@ function Guided.ParseLine(step, t)
       elseif disp then kind = "note"; etext = disp        -- any other command, show its text only
       end
     elseif first == "#" then
-      local _, _, key, val = string.find(pre, "^#(%S+)%s*(.*)")
+      local _, _, key, val = string.find(pre, "^#(%a+)%s*(.*)")
+      if val then val = trim(string.gsub(val, "%s*%-%-.*$", "")) end
       if key == "level" then
         step.level = tonumber(val); kind = "level"; etext = disp or ("Reach level "..(val or "?"))
       elseif key then
@@ -1632,6 +1656,62 @@ function Guided.WheelScroll(dir)
   GuidedScrollFrame:SetVerticalScroll(v)
 end
 
+-- countdown bar for ".timer" steps (we draw our own; RXP's LibCandyBar is Ace3,
+-- unavailable on 1.12). Starts on arrival at a timed step, hides at 0.
+local function EnsureTimerBar()
+  if GuidedTimerBar then return end
+  local tb = CreateFrame("Frame", "GuidedTimerBar", UIParent)
+  tb:SetWidth(220); tb:SetHeight(22)
+  tb:SetPoint("TOP", UIParent, "TOP", 0, -140)
+  tb:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 12,
+    insets = { left = 3, right = 3, top = 3, bottom = 3 } })
+  tb:SetBackdropColor(0, 0, 0, 0.85)
+  tb:SetMovable(true); tb:EnableMouse(true); tb:RegisterForDrag("LeftButton")
+  tb:SetScript("OnDragStart", function() this:StartMoving() end)
+  tb:SetScript("OnDragStop", function() this:StopMovingOrSizing() end)
+  local bar = CreateFrame("StatusBar", "GuidedTimerBarFill", tb)
+  bar:SetPoint("TOPLEFT", tb, "TOPLEFT", 4, -4); bar:SetPoint("BOTTOMRIGHT", tb, "BOTTOMRIGHT", -4, 4)
+  bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+  bar:SetStatusBarColor(0.2, 0.55, 1); bar:SetMinMaxValues(0, 1); bar:SetValue(1)
+  local lbl = bar:CreateFontString("GuidedTimerBarLabel", "OVERLAY", "GameFontHighlightSmall")
+  lbl:SetPoint("LEFT", bar, "LEFT", 6, 0)
+  local tt = bar:CreateFontString("GuidedTimerBarTime", "OVERLAY", "GameFontHighlightSmall")
+  tt:SetPoint("RIGHT", bar, "RIGHT", -6, 0)
+  tb:SetScript("OnUpdate", function()
+    if not Guided.timerEnd then return end
+    local rem = Guided.timerEnd - GetTime()
+    if rem <= 0 then
+      GuidedTimerBarFill:SetValue(0); GuidedTimerBarTime:SetText("0:00")
+      this:Hide(); Guided.timerEnd = nil
+      return
+    end
+    local total = Guided.timerTotal or rem
+    GuidedTimerBarFill:SetValue(rem / total)
+    local sec = math.floor(rem)
+    GuidedTimerBarTime:SetText(string.format("%d:%02d", math.floor(sec / 60), sec - math.floor(sec / 60) * 60))
+  end)
+  tb:Hide()
+end
+
+function Guided.UpdateTimerBar()
+  local cur = Guided.active and Guided.active[Guided_Save.step]
+  local t = cur and cur.timer
+  if not t then
+    if GuidedTimerBar then GuidedTimerBar:Hide() end
+    Guided.timerStep = nil
+    return
+  end
+  EnsureTimerBar()
+  if Guided.timerStep ~= cur then         -- newly arrived at this timed step: (re)start
+    Guided.timerStep = cur
+    Guided.timerEnd = GetTime() + t.secs
+    Guided.timerTotal = t.secs
+    GuidedTimerBarLabel:SetText(t.label or "Timer")
+    GuidedTimerBar:Show()
+  end
+end
+
 function Guided.UpdateUI()
   if not GuidedFrame then return end
   local g = Guided.CurrentGuide()
@@ -1722,6 +1802,7 @@ function Guided.UpdateUI()
   GuidedScrollChild:SetHeight(y > 0 and y or 1)
   Guided.ScrollToStep(cur)
   Guided.SetWaypoint(Guided.active[cur])
+  Guided.UpdateTimerBar()
 end
 
 -- ------------------------------------------------------ guide-select menu ----

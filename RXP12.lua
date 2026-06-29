@@ -262,7 +262,9 @@ function RXP12.ParseLine(step, t)
           end
         end
       elseif cmd == "fp" or cmd == "getfp" then kind = "fp"; etext = disp or "Get the flight point"
-      elseif cmd == "fly" or cmd == "taxi" then kind = "fly"; etext = disp or ("Fly to "..rest)
+      elseif cmd == "fly" or cmd == "taxi" then
+        kind = "fly"; etext = disp or ("Fly to "..rest)
+        step.fly = step.fly or trim(rest)   -- destination name for auto-taxi
       elseif cmd == "vendor" or cmd == "buy" then kind = "vendor"; etext = disp or (rest ~= "" and rest) or "Vendor"
       elseif cmd == "train" or cmd == "trainer" then kind = "train"; etext = disp or "Train your spells"
       elseif cmd == "hearth" or cmd == "sethearth" or cmd == "home" then kind = "hearth"; etext = disp or "Hearthstone"
@@ -519,6 +521,51 @@ local arrowThrottle = 0
 
 -- where the arrow points: the current step's goto; if it has none (e.g. a "grind"
 -- step), fall back to an active sticky's goto so it still points at the kill area.
+-- flight destinations wanted by the current step, a few ahead, and active stickies
+function RXP12.WantedFlights()
+  local want = {}
+  if not RXP12.active then return want end
+  local cur = RXP12_Save.step or 1
+  for d = 0, 3 do
+    local st = RXP12.active[cur + d]
+    if st and st.fly then tinsert(want, string.upper(st.fly)) end
+  end
+  if RXP12.activeStickies then
+    for idx in pairs(RXP12.activeStickies) do
+      local st = RXP12.active[idx]
+      if st and st.fly then tinsert(want, string.upper(st.fly)) end
+    end
+  end
+  return want
+end
+
+-- on TAXIMAP_OPENED: fly to the wanted destination (match the node name)
+function RXP12.HandleTaxi()
+  if not RXP12_Save.auto then return end
+  local want = RXP12.WantedFlights()
+  if table.getn(want) == 0 then return end
+  local n = (NumTaxiNodes and NumTaxiNodes()) or 0
+  for i = 1, n do
+    local name = TaxiNodeName and TaxiNodeName(i)
+    if name and (not TaxiNodeGetType or TaxiNodeGetType(i) ~= "CURRENT") then
+      local up = string.upper(name)
+      for w = 1, table.getn(want) do
+        if string.find(up, want[w], 1, true) then TakeTaxiNode(i); return end
+      end
+    end
+  end
+end
+
+-- on GOSSIP_SHOW at a flight master that uses a gossip menu: pick the taxi option
+function RXP12.HandleTaxiGossip()
+  if not RXP12_Save.auto or not GetGossipOptions then return end
+  if table.getn(RXP12.WantedFlights()) == 0 then return end
+  local opts = { GetGossipOptions() }   -- text1, type1, text2, type2, ...
+  for i = 1, table.getn(opts), 2 do
+    if opts[i + 1] == "taxi" then SelectGossipOption((i + 1) / 2); return end
+  end
+end
+
 function RXP12.ArrowGoto()
   local step = RXP12.CurrentStep()
   if step and step.gotos and step.gotos[1] then return step.gotos[1] end
@@ -2189,6 +2236,7 @@ ev:RegisterEvent("QUEST_PROGRESS")
 ev:RegisterEvent("QUEST_COMPLETE")
 ev:RegisterEvent("QUEST_GREETING")
 ev:RegisterEvent("GOSSIP_SHOW")
+ev:RegisterEvent("TAXIMAP_OPENED")     -- auto flight paths (gated on RXP12_Save.auto)
 
 local function OnEvent()
   if event == "VARIABLES_LOADED" then
@@ -2243,9 +2291,12 @@ local function OnEvent()
       t.lastXP = cur; t.lastMax = UnitXPMax("player") or 1
       RXP12.UpdateTracker()
     end
+  elseif event == "TAXIMAP_OPENED" then
+    RXP12.HandleTaxi()
   elseif event == "QUEST_DETAIL" or event == "QUEST_PROGRESS"
       or event == "QUEST_COMPLETE" or event == "QUEST_GREETING"
       or event == "GOSSIP_SHOW" then
+    if event == "GOSSIP_SHOW" then RXP12.HandleTaxiGossip() end
     RXP12.HandleQuestEvent(event)
   end
 end

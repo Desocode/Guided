@@ -1059,6 +1059,7 @@ end
 -- live objective progress and a progress bar; other steps are compact one-liners.
 Guided.rows = Guided.rows or {}
 Guided.rowY = Guided.rowY or {}
+local BASE_SCALE = 0.8   -- intrinsic design scale; the user "Window scale" slider multiplies this (1.0 = this size)
 local ROW_WIDTH = 286
 local GUTTER = 26                       -- left column for the step-number badge
 local CONTENT_X = GUTTER + 4
@@ -2247,12 +2248,8 @@ local function CreateOptions()
     function() return Guided_Save.hidedone end,
     function(v) Guided_Save.hidedone = v; Guided.UpdateUI() end,
     "Remove finished steps from the list instead of greying them out.")
-  MakeCheck(pD, "GuidedOptStepBelow", "Show active step below the list", -34,
-    function() return Guided_Save.stepbelow end,
-    function(v) Guided_Save.stepbelow = v; Guided.ApplyStepAnchor() end,
-    "Dock the current-step frame under the list instead of above it.")
   local s = CreateFrame("Slider", "GuidedOptScale", pD, "OptionsSliderTemplate")
-  s:SetWidth(300); s:SetHeight(16); s:SetPoint("TOP", pD, "TOP", 0, -84)
+  s:SetWidth(300); s:SetHeight(16); s:SetPoint("TOP", pD, "TOP", 0, -34)
   s:SetMinMaxValues(0.7, 1.5); s:SetValueStep(0.05)
   getglobal("GuidedOptScaleLow"):SetText("0.7")
   getglobal("GuidedOptScaleHigh"):SetText("1.5")
@@ -2260,10 +2257,10 @@ local function CreateOptions()
   s:SetValue(Guided_Save.scale or 1)
   s:SetScript("OnValueChanged", function()
     Guided_Save.scale = this:GetValue()
-    if GuidedFrame then GuidedFrame:SetScale(Guided_Save.scale) end
+    if GuidedFrame then GuidedFrame:SetScale(BASE_SCALE * Guided_Save.scale) end
   end)
   local op = CreateFrame("Slider", "GuidedOptOpacity", pD, "OptionsSliderTemplate")
-  op:SetWidth(300); op:SetHeight(16); op:SetPoint("TOP", pD, "TOP", 0, -132)
+  op:SetWidth(300); op:SetHeight(16); op:SetPoint("TOP", pD, "TOP", 0, -82)
   op:SetMinMaxValues(0, 1); op:SetValueStep(0.05)
   getglobal("GuidedOptOpacityLow"):SetText("0")
   getglobal("GuidedOptOpacityHigh"):SetText("1")
@@ -2392,7 +2389,6 @@ function Guided.ToggleOptions(tab)
   if GuidedOptTracker then GuidedOptTracker:SetChecked(Guided_Save.tracker == true) end
   if GuidedOptFly then GuidedOptFly:SetChecked(Guided_Save.autofly ~= false) end
   if GuidedOptHideDone then GuidedOptHideDone:SetChecked(Guided_Save.hidedone == true) end
-  if GuidedOptStepBelow then GuidedOptStepBelow:SetChecked(Guided_Save.stepbelow == true) end
   if GuidedOptSkipOver then GuidedOptSkipOver:SetChecked(Guided_Save.skipoverlevel ~= false) end
   if GuidedOptHardcore then GuidedOptHardcore:SetChecked(Guided_Save.hardcore == true) end
   if GuidedOptXpRate then GuidedOptXpRate:SetValue(Guided_Save.xprate or 1) end
@@ -2446,7 +2442,8 @@ local function Defaults()
   if Guided_Save.auto == nil then Guided_Save.auto = false end   -- auto quest pickup/turn-in (opt-in)
   if Guided_Save.arrow == nil then Guided_Save.arrow = true end
   if Guided_Save.locked == nil then Guided_Save.locked = false end
-  if Guided_Save.scale == nil then Guided_Save.scale = 0.8 end
+  if Guided_Save.scale == nil then Guided_Save.scale = 1 end
+  if Guided_Save.scale == 0.8 then Guided_Save.scale = 1 end   -- old 0.8 default -> new 1.0 baseline (BASE_SCALE keeps the size)
   if Guided_Save.opacity == nil then Guided_Save.opacity = 0.92 end
   if Guided_Save.dungeons == nil then Guided_Save.dungeons = {} end
   if Guided_Save.done == nil then Guided_Save.done = {} end   -- legacy (unused)
@@ -2539,7 +2536,7 @@ local function OnEvent()
     Guided.trk = { t0 = GetTime(), xp = 0, lastXP = UnitXP("player") or 0,
                   lastMax = UnitXPMax("player") or 1, lvlStart = GetTime() }
     Guided.ApplyTracker()
-    if Guided_Save.scale and GuidedFrame then GuidedFrame:SetScale(Guided_Save.scale) end
+    if Guided_Save.scale and GuidedFrame then GuidedFrame:SetScale(BASE_SCALE * Guided_Save.scale) end
     if Guided_Save.shown then Guided.Show() else Guided.Hide() end
     Guided.SkipForward()   -- resume at the first not-yet-completed step
     Print("loaded. Guide: |cffffd200"..(Guided_Save.guide or "none")

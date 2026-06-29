@@ -586,7 +586,7 @@ end
 
 -- on TAXIMAP_OPENED: fly to the wanted destination (match the node name)
 function Guided.HandleTaxi()
-  if not Guided_Save.auto then return end
+  if not Guided_Save.autofly then return end
   local want = Guided.WantedFlights()
   if table.getn(want) == 0 then return end
   local n = (NumTaxiNodes and NumTaxiNodes()) or 0
@@ -603,7 +603,7 @@ end
 
 -- on GOSSIP_SHOW at a flight master that uses a gossip menu: pick the taxi option
 function Guided.HandleTaxiGossip()
-  if not Guided_Save.auto or not GetGossipOptions then return end
+  if not Guided_Save.autofly or not GetGossipOptions then return end
   if table.getn(Guided.WantedFlights()) == 0 then return end
   local opts = { GetGossipOptions() }   -- text1, type1, text2, type2, ...
   for i = 1, table.getn(opts), 2 do
@@ -761,7 +761,7 @@ end
 function Guided.IsStepDone(step, log)
   if not step then return false end
   if step.level and UnitLevel("player") >= step.level then return true end
-  if step.xpGate and Guided.XpGateMet(step.xpGate) then return true end
+  if step.xpGate and (step.xpGate.skip or Guided_Save.skipoverlevel ~= false) and Guided.XpGateMet(step.xpGate) then return true end
   if table.getn(step.quests) == 0 then return false end
   if not log then return false end
   local any = false
@@ -1615,8 +1615,9 @@ function Guided.UpdateUI()
   for i = 1, n do
     local st = Guided.active[i]
     local r = GetRow(i)
-    if st.xpGate and st.xpGate.skip and Guided.XpGateMet(st.xpGate) then
-      r:Hide(); Guided.rowY[i] = y          -- skipstep gate not applicable: hide (like a class filter)
+    local doneHidden = Guided_Save.hidedone and i < cur and not (Guided.activeStickies and Guided.activeStickies[i])
+    if doneHidden or (st.xpGate and st.xpGate.skip and Guided.XpGateMet(st.xpGate)) then
+      r:Hide(); Guided.rowY[i] = y          -- completed (when "hide completed") or inapplicable gate
     else
       local h = RenderRow(r, st, i, cur, false)
       r:ClearAllPoints()
@@ -1847,6 +1848,18 @@ function Guided.ToggleMenu()
   Guided.OpenMenu(nil, "GuidedFrameCog")
 end
 
+function Guided.ApplyStepAnchor()
+  local sfr = GuidedStepFrame; if not sfr or not GuidedFrame then return end
+  sfr:ClearAllPoints()
+  if Guided_Save.stepbelow then
+    sfr:SetPoint("TOPLEFT", GuidedFrame, "BOTTOMLEFT", 0, -6)
+    sfr:SetPoint("TOPRIGHT", GuidedFrame, "BOTTOMRIGHT", 0, -6)
+  else
+    sfr:SetPoint("BOTTOMLEFT", GuidedFrame, "TOPLEFT", 0, 6)
+    sfr:SetPoint("BOTTOMRIGHT", GuidedFrame, "TOPRIGHT", 0, 6)
+  end
+end
+
 local function CreateUI()
   if GuidedFrame then return end
   local f = CreateFrame("Frame", "GuidedFrame", UIParent)
@@ -1919,9 +1932,8 @@ local function CreateUI()
 
   -- linked top frame: the current step in full detail (sits above the list)
   local sfr = CreateFrame("Frame", "GuidedStepFrame", f)
-  sfr:SetPoint("BOTTOMLEFT", f, "TOPLEFT", 0, 6)
-  sfr:SetPoint("BOTTOMRIGHT", f, "TOPRIGHT", 0, 6)
   sfr:SetHeight(60)
+  Guided.ApplyStepAnchor()
   sfr:SetBackdrop({
     bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
     edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -2133,7 +2145,7 @@ end
 local function CreateOptions()
   if GuidedOptionsFrame then return end
   local f = CreateFrame("Frame", "GuidedOptionsFrame", UIParent)
-  f:SetWidth(452); f:SetHeight(366)
+  f:SetWidth(452); f:SetHeight(404)
   f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
   f:SetBackdrop({
     bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -2195,10 +2207,22 @@ local function CreateOptions()
     function() return Guided_Save.tracker end,
     function(v) Guided_Save.tracker = v; Guided.ApplyTracker() end,
     "Show experience per hour, time spent on this level, and estimated time to level.")
+  MakeCheck(pG, "GuidedOptFly", "Auto-take flight paths", -146,
+    function() return Guided_Save.autofly ~= false end,
+    function(v) Guided_Save.autofly = v end,
+    "When you open a flight master, automatically fly to the step's destination.")
 
   -- ---------- Display ----------
+  MakeCheck(pD, "GuidedOptHideDone", "Hide completed steps", -6,
+    function() return Guided_Save.hidedone end,
+    function(v) Guided_Save.hidedone = v; Guided.UpdateUI() end,
+    "Remove finished steps from the list instead of greying them out.")
+  MakeCheck(pD, "GuidedOptStepBelow", "Show active step below the list", -34,
+    function() return Guided_Save.stepbelow end,
+    function(v) Guided_Save.stepbelow = v; Guided.ApplyStepAnchor() end,
+    "Dock the current-step frame under the list instead of above it.")
   local s = CreateFrame("Slider", "GuidedOptScale", pD, "OptionsSliderTemplate")
-  s:SetWidth(300); s:SetHeight(16); s:SetPoint("TOP", pD, "TOP", 0, -24)
+  s:SetWidth(300); s:SetHeight(16); s:SetPoint("TOP", pD, "TOP", 0, -84)
   s:SetMinMaxValues(0.7, 1.5); s:SetValueStep(0.05)
   getglobal("GuidedOptScaleLow"):SetText("0.7")
   getglobal("GuidedOptScaleHigh"):SetText("1.5")
@@ -2209,7 +2233,7 @@ local function CreateOptions()
     if GuidedFrame then GuidedFrame:SetScale(Guided_Save.scale) end
   end)
   local op = CreateFrame("Slider", "GuidedOptOpacity", pD, "OptionsSliderTemplate")
-  op:SetWidth(300); op:SetHeight(16); op:SetPoint("TOP", pD, "TOP", 0, -72)
+  op:SetWidth(300); op:SetHeight(16); op:SetPoint("TOP", pD, "TOP", 0, -132)
   op:SetMinMaxValues(0, 1); op:SetValueStep(0.05)
   getglobal("GuidedOptOpacityLow"):SetText("0")
   getglobal("GuidedOptOpacityHigh"):SetText("1")
@@ -2220,9 +2244,13 @@ local function CreateOptions()
     if GuidedFrame then GuidedFrame:SetBackdropColor(0.05, 0.05, 0.07, Guided_Save.opacity) end
   end)
 
-  -- ---------- Routing (dungeons) ----------
+  -- ---------- Routing ----------
+  MakeCheck(pR, "GuidedOptSkipOver", "Skip overleveled steps", -2,
+    function() return Guided_Save.skipoverlevel ~= false end,
+    function(v) Guided_Save.skipoverlevel = v; Guided.BuildActive(); Guided.SkipForward(); Guided.UpdateUI() end,
+    "Automatically skip grind/level steps once you're already past their target level.")
   local rhdr = pR:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  rhdr:SetPoint("TOPLEFT", pR, "TOPLEFT", 2, -2); rhdr:SetText("|cffffd200Dungeons|r")
+  rhdr:SetPoint("TOPLEFT", pR, "TOPLEFT", 2, -40); rhdr:SetText("|cffffd200Dungeons|r")
   local rhdiv = pR:CreateTexture(nil, "ARTWORK")
   rhdiv:SetPoint("TOPLEFT", rhdr, "BOTTOMLEFT", 0, -3); rhdiv:SetWidth(414); rhdiv:SetHeight(1)
   rhdiv:SetTexture(1, 1, 1, 0.12)
@@ -2234,7 +2262,7 @@ local function CreateOptions()
     c:SetWidth(22); c:SetHeight(22)
     local col, row = 0, i - 1
     if i > 8 then col = 1; row = i - 9 end
-    c:SetPoint("TOPLEFT", pR, "TOPLEFT", 2 + col * 208, -52 - row * 23)
+    c:SetPoint("TOPLEFT", pR, "TOPLEFT", 2 + col * 208, -92 - row * 23)
     getglobal(c:GetName().."Text"):SetText(DUNGEON_NAMES[code] or code)
     c.code = code
     c:SetChecked(Guided_Save.dungeons[code] and true or false)
@@ -2319,6 +2347,10 @@ function Guided.ToggleOptions(tab)
   if GuidedOptScale then GuidedOptScale:SetValue(Guided_Save.scale or 1) end
   if GuidedOptOpacity then GuidedOptOpacity:SetValue(Guided_Save.opacity or 0.92) end
   if GuidedOptTracker then GuidedOptTracker:SetChecked(Guided_Save.tracker == true) end
+  if GuidedOptFly then GuidedOptFly:SetChecked(Guided_Save.autofly ~= false) end
+  if GuidedOptHideDone then GuidedOptHideDone:SetChecked(Guided_Save.hidedone == true) end
+  if GuidedOptStepBelow then GuidedOptStepBelow:SetChecked(Guided_Save.stepbelow == true) end
+  if GuidedOptSkipOver then GuidedOptSkipOver:SetChecked(Guided_Save.skipoverlevel ~= false) end
   Guided.RefreshDungeonChecks()
   Guided.OptTab(tab or Guided.optTab or "General")
   GuidedOptionsFrame:Show()
@@ -2377,6 +2409,10 @@ local function Defaults()
   if Guided_Save.minimap == nil then Guided_Save.minimap = true end
   if Guided_Save.splits == nil then Guided_Save.splits = {} end
   if Guided_Save.tracker == nil then Guided_Save.tracker = false end
+  if Guided_Save.autofly == nil then Guided_Save.autofly = true end
+  if Guided_Save.hidedone == nil then Guided_Save.hidedone = false end
+  if Guided_Save.stepbelow == nil then Guided_Save.stepbelow = false end
+  if Guided_Save.skipoverlevel == nil then Guided_Save.skipoverlevel = true end
 end
 
 -- score a guide for "is this the right one to start me on?" given the player level.

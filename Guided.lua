@@ -1108,6 +1108,10 @@ function Guided.IsStepDone(step, log)
       local key = lc(nm)
       local entry = log[key]
       if q.action == "accept" then
+        if q.id and q.id == Guided.justAbandonedId then
+          if entry then return false                         -- just abandoned but still transiently in log: not "done"
+          else Guided.justAbandonedId = nil end              -- abandon confirmed (quest gone): clear the guard
+        end
         if not entry then return false end                   -- quest not in log yet
       elseif q.action == "complete" then
         if not entry then return false                       -- not even accepted
@@ -3076,6 +3080,7 @@ function AbandonQuest()
       for k = 1, table.getn(qs or {}) do
         if qs[k].action == "accept" and lc(QuestName(qs[k].id) or "") == key then
           if i < (Guided_Save.step or 1) then Guided_Save.step = i; Guided.dbgRoute = i end
+          Guided.justAbandonedId = qs[k].id        -- guard this accept step against the abandon transient
           break
         end
       end

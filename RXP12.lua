@@ -1254,7 +1254,7 @@ local function GetElemRow(r, j)
   er.check = CreateFrame("CheckButton", nil, er, "UIRadioButtonTemplate")
   er.check:SetWidth(18); er.check:SetHeight(18)
   er.check:SetPoint("TOPLEFT", er, "TOPLEFT", 1, -1)
-  local rn = er.check:GetNormalTexture(); if rn then rn:SetVertexColor(1, 1, 1, 0.35) end   -- de-grey the ring
+  local rn = er.check:GetNormalTexture(); if rn then rn:SetVertexColor(1, 0.96, 0.85, 0.95) end  -- bright warm ring
   local ck = er.check:GetCheckedTexture(); if ck then ck:SetVertexColor(0.3, 1, 0.3) end    -- green dot
   er.icon = er:CreateTexture(nil, "OVERLAY")
   er.icon:SetWidth(13); er.icon:SetHeight(13)

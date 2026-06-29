@@ -249,12 +249,16 @@ function RXP12.ParseLine(step, t)
         local _, _, id = string.find(rest, "(%d+)")
         if id and not step.useitem then step.useitem = tonumber(id) end   -- quest item to use
       elseif cmd == "target" or cmd == "mob" then
-        if not step.target then
-          local nm = rest
-          nm = string.gsub(nm, '"', "")        -- RXP uses quotes for partial match
-          nm = string.gsub(nm, "^%+", "")       -- and a leading + for "additional"
-          nm = trim(nm)
-          if nm ~= "" then step.target = nm end
+        local nm = rest
+        nm = string.gsub(nm, '"', "")          -- RXP uses quotes for partial match
+        nm = string.gsub(nm, "^%+", "")         -- and a leading + for "additional"
+        nm = trim(nm)
+        if nm ~= "" then
+          step.targets = step.targets or {}
+          local dup = false
+          for k = 1, table.getn(step.targets) do if step.targets[k] == nm then dup = true; break end end
+          if not dup then tinsert(step.targets, nm) end
+          step.target = step.target or nm
         end
       elseif disp then kind = "note"; etext = disp        -- any other command, show its text only
       end
@@ -384,6 +388,17 @@ end
 
 function RXP12.Advance() RXP12.SetStep((RXP12_Save.step or 1) + 1) end
 function RXP12.Back()    RXP12.SetStep((RXP12_Save.step or 1) - 1) end
+
+-- cycle-target the current step's mobs (one per call). Bind via a macro: /rxp12 target
+function RXP12.TargetStep()
+  local step = RXP12.CurrentStep()
+  local t = step and step.targets
+  if not t or table.getn(t) == 0 then return end
+  local i = (RXP12.targetIdx or 0) + 1
+  if i > table.getn(t) then i = 1 end
+  RXP12.targetIdx = i
+  TargetByName(t[i])
+end
 
 -- parse a ".goto" payload -> zoneName(or nil), mapid(or nil), x, y
 -- forms: "Zone Name,x,y[,r]" | "x,y" | "mapid,x,y[,r]"
@@ -986,7 +1001,7 @@ local function GetRow(i)
   -- action buttons (shown only on the current step)
   r.targetBtn = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
   r.targetBtn:SetHeight(18); r.targetBtn:Hide()
-  r.targetBtn:SetScript("OnClick", function() if this.tname then TargetByName(this.tname) end end)
+  r.targetBtn:SetScript("OnClick", function() RXP12.TargetStep() end)
   r.useBtn = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
   r.useBtn:SetHeight(18); r.useBtn:SetWidth(120); r.useBtn:SetText("Use quest item"); r.useBtn:Hide()
   r.useBtn:SetScript("OnClick", function() if this.uid then RXP12.UseItemById(this.uid) end end)
@@ -1095,10 +1110,11 @@ local function RenderRow(r, step, i, cur)
       if n > 0 then RXP12.Advance() end
     end
     -- Target / Use action buttons
-    if step.target then
-      r.targetBtn.tname = step.target
-      r.targetBtn:SetText("Target: "..step.target)
-      local w = 64 + string.len(step.target) * 6; if w > CONTENT_W then w = CONTENT_W end
+    if step.targets and table.getn(step.targets) > 0 then
+      local nt = table.getn(step.targets)
+      local lbl = (nt > 1) and ("Target ("..nt.." mobs)") or ("Target: "..step.targets[1])
+      r.targetBtn:SetText(lbl)
+      local w = 56 + string.len(lbl) * 6; if w > CONTENT_W then w = CONTENT_W end
       r.targetBtn:SetWidth(w)
       r.targetBtn:ClearAllPoints(); r.targetBtn:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
       r.targetBtn:Show(); y = y + 22
@@ -1879,6 +1895,7 @@ SlashCmdList["RXP12"] = function(msg)
   local _, _, cmd, arg = string.find(msg, "^(%a*)%s*(.*)$")
   if cmd == "next" then RXP12.Advance()
   elseif cmd == "prev" or cmd == "back" then RXP12.Back()
+  elseif cmd == "target" then RXP12.TargetStep()
   elseif cmd == "options" or cmd == "config" or cmd == "opt" then RXP12.ToggleOptions()
   elseif cmd == "dungeons" then RXP12.ShowDungeons()
   elseif cmd == "import" then

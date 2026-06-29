@@ -681,7 +681,7 @@ function RXP12.ArrowUpdate(elapsed)
   model:SetTexCoord((column*56)/512, ((column+1)*56)/512, (row*42)/512, ((row+1)*42)/512)
   model:Show()
   if dist < 12 then txt:SetText("|cff66cc66Arrived|r")
-  else txt:SetText(string.format("%d yd", dist)) end
+  else txt:SetText(string.format("%d yds", dist)) end
 end
 
 local function CreateArrow()

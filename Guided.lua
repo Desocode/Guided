@@ -2281,7 +2281,7 @@ local function CreateOptions()
   s:SetText(string.format("%.3g", Guided_Save.scale or 1))
   local shint = pD:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   shint:SetPoint("LEFT", s, "RIGHT", 10, 0); shint:SetText("0.5 - 2.0  (1.0 = default size)")
-  local function ApplyScaleBox()
+  local function ApplyScaleBox()        -- this IS the OnEditFocusLost handler: must NOT call ClearFocus (would re-fire -> stack overflow)
     local v = tonumber(s:GetText())
     if v then
       if v < 0.5 then v = 0.5 elseif v > 2 then v = 2 end
@@ -2289,9 +2289,8 @@ local function CreateOptions()
       if GuidedFrame then GuidedFrame:SetScale(BASE_SCALE * v) end
     end
     s:SetText(string.format("%.3g", Guided_Save.scale or 1))
-    s:ClearFocus()
   end
-  s:SetScript("OnEnterPressed", ApplyScaleBox)
+  s:SetScript("OnEnterPressed", function() this:ClearFocus() end)   -- ClearFocus -> OnEditFocusLost -> ApplyScaleBox
   s:SetScript("OnEditFocusLost", ApplyScaleBox)
   s:SetScript("OnEscapePressed", function()
     this:SetText(string.format("%.3g", Guided_Save.scale or 1)); this:ClearFocus()
@@ -2485,7 +2484,7 @@ local function Defaults()
   if Guided_Save.arrow == nil then Guided_Save.arrow = true end
   if Guided_Save.locked == nil then Guided_Save.locked = false end
   if Guided_Save.scale == nil then Guided_Save.scale = 1 end
-  if Guided_Save.scale == 0.8 then Guided_Save.scale = 1 end   -- old 0.8 default -> new 1.0 baseline (BASE_SCALE keeps the size)
+  if not Guided_Save.scaleV2 then Guided_Save.scale = 1; Guided_Save.scaleV2 = true end  -- one-time reset to the 1.0 baseline; BASE_SCALE renders it at the original size
   if Guided_Save.opacity == nil then Guided_Save.opacity = 0.92 end
   if Guided_Save.dungeons == nil then Guided_Save.dungeons = {} end
   if Guided_Save.done == nil then Guided_Save.done = {} end   -- legacy (unused)

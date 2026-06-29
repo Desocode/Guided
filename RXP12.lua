@@ -269,12 +269,28 @@ function RXP12.ParseLine(step, t)
       elseif cmd == "train" or cmd == "trainer" then kind = "train"; etext = disp or "Train your spells"
       elseif cmd == "hearth" or cmd == "sethearth" or cmd == "home" then kind = "hearth"; etext = disp or "Hearthstone"
       elseif cmd == "xp" then
-        -- ".xp <level>" = grind until that level; treat it as a level gate so the
-        -- step auto-completes on ding (else it sits as a stuck text-only step).
-        local _, _, lvl = string.find(rest, "(%d+)")
+        -- RXP ".xp [<]level[+/-xp][,skipstep]": a level/xp gate (see functions.xp).
+        -- When satisfied the step is treated done and hidden (bypassed), like RXP.
+        local part, skip = rest, nil
+        local cc = string.find(rest, ",", 1, true)
+        if cc then part = string.sub(rest, 1, cc - 1); skip = trim(string.sub(rest, cc + 1)) end
+        part = string.gsub(trim(part), " ", "")
+        local _, _, op, lvl, off = string.find(part, "(<?)(%d+)([%+%.%-]?%d*)")
         lvl = tonumber(lvl)
-        if lvl and lvl >= 1 and lvl <= 60 then step.level = step.level or lvl end
-        kind = "level"; etext = disp or ("Grind to level "..(lvl or "?"))
+        if lvl then
+          step.xpGate = { level = lvl, xp = tonumber(off) or 0, reverse = (op == "<"),
+                          skip = (skip ~= nil and skip ~= "") }
+          if not step.xpGate.skip then        -- skipstep gates are textOnly (no line)
+            kind = "level"
+            if not etext then
+              local x = step.xpGate.xp
+              if x < 0 then etext = string.format("Grind until you are %d xp away from level %d", -x, lvl)
+              elseif x >= 1 then etext = string.format("Grind until you are %d xp into level %d", x, lvl)
+              elseif x > 0 then etext = string.format("Grind until you are %d%% into level %d", math.floor(x*100), lvl)
+              else etext = "Grind to level "..lvl end
+            end
+          end
+        end
       elseif cmd == "dungeon" or cmd == "dungeonskip" then
         local _, _, code = string.find(rest, "^(%S+)")
         if code then
@@ -679,9 +695,25 @@ end
 
 -- is a step already satisfied? text-only steps (no quests, no level) are never
 -- "auto-done" -- they need a manual Next so we don't skip instructions.
+-- RXP's .xp gate test (matches functions.xp completion logic)
+function RXP12.XpGateMet(g)
+  if not g then return false end
+  local lvl = UnitLevel("player") or 1
+  local cur = UnitXP("player") or 0
+  local mx = UnitXPMax("player") or 1
+  local L, X = g.level, g.xp or 0
+  local raw
+  if X < 0 then raw = (lvl >= L) or (lvl == L - 1 and cur >= mx + X)
+  elseif X >= 1 then raw = (lvl > L) or (lvl == L and cur >= X)
+  else raw = (lvl > L) or (lvl == L and cur >= mx * X) end
+  if g.reverse then return not raw end
+  return raw
+end
+
 function RXP12.IsStepDone(step, log)
   if not step then return false end
   if step.level and UnitLevel("player") >= step.level then return true end
+  if step.xpGate and RXP12.XpGateMet(step.xpGate) then return true end
   if table.getn(step.quests) == 0 then return false end
   if not log then return false end
   local any = false
@@ -1443,13 +1475,18 @@ function RXP12.UpdateUI()
   RXP12.rowY = {}
   local y = 0
   for i = 1, n do
+    local st = RXP12.active[i]
     local r = GetRow(i)
-    local h = RenderRow(r, RXP12.active[i], i, cur)
-    r:ClearAllPoints()
-    r:SetPoint("TOPLEFT", RXP12ScrollChild, "TOPLEFT", 0, -y)
-    r:Show()
-    RXP12.rowY[i] = y
-    y = y + h
+    if st.xpGate and RXP12.XpGateMet(st.xpGate) then
+      r:Hide(); RXP12.rowY[i] = y          -- gate satisfied: bypass (hidden, like RXP)
+    else
+      local h = RenderRow(r, st, i, cur)
+      r:ClearAllPoints()
+      r:SetPoint("TOPLEFT", RXP12ScrollChild, "TOPLEFT", 0, -y)
+      r:Show()
+      RXP12.rowY[i] = y
+      y = y + h
+    end
   end
   local idx = n + 1
   while RXP12.rows[idx] do RXP12.rows[idx]:Hide(); idx = idx + 1 end
@@ -2291,6 +2328,7 @@ local function OnEvent()
       t.lastXP = cur; t.lastMax = UnitXPMax("player") or 1
       RXP12.UpdateTracker()
     end
+    RXP12.SkipForward(); RXP12.UpdateUI()   -- advance/hide .xp grind gates
   elseif event == "TAXIMAP_OPENED" then
     RXP12.HandleTaxi()
   elseif event == "QUEST_DETAIL" or event == "QUEST_PROGRESS"

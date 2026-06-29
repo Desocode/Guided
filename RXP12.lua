@@ -1309,7 +1309,7 @@ local function RenderRow(r, step, i, cur, expand)
   -- badge + status styling
   r.num:SetText(tostring(i))
   if isCur then
-    r.bg:Show(); r.bg:SetTexture(0.16, 0.42, 0.85, 0.30)
+    r.bg:Show(); r.bg:SetTexture(0.16, 0.42, 0.85, 0.16)
     r.accent:Show(); r.accent:SetTexture(0.3, 1, 0.3, 0.9)
     r.check:Hide(); r.num:Show()
   elseif active then

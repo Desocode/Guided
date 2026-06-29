@@ -1460,7 +1460,7 @@ local function RenderRow(r, step, i, cur, expand)
         er:SetWidth(CONTENT_W); er:SetHeight(eh)
         er:ClearAllPoints(); er:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
         er:Show()
-        y = y + eh + (vis > 1 and 1 or 5)   -- substeps tight; more space under the top line
+        y = y + eh + (vis > 1 and 1 or 3)   -- substeps tight; a little space under the top line
       end
     end
     -- (objective counts are shown inline on each .complete line above)
@@ -1493,21 +1493,25 @@ local function RenderRow(r, step, i, cur, expand)
       end
       if n > 0 then RXP12.Advance() end
     end
-    -- Target / Use action buttons
-    if step.targets and table.getn(step.targets) > 0 then
+    -- Target / Use action buttons (side by side, one row)
+    local hasT = step.targets and table.getn(step.targets) > 0
+    local hasU = step.useitems and table.getn(step.useitems) > 0
+    if hasT or hasU then y = y + 6 end
+    if hasT then
       local nt = table.getn(step.targets)
-      r.targetBtn:SetText(nt > 1 and ("Target ("..nt..")") or "Target")
-      r.targetBtn:SetWidth(90)
+      r.targetBtn:SetText(nt > 1 and ("Target ("..nt..")") or "Target"); r.targetBtn:SetWidth(90)
       r.targetBtn:ClearAllPoints(); r.targetBtn:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
-      r.targetBtn:Show(); y = y + 22
+      r.targetBtn:Show()
     else r.targetBtn:Hide() end
-    if step.useitems and table.getn(step.useitems) > 0 then
+    if hasU then
       local nu = table.getn(step.useitems)
-      r.useBtn:SetText(nu > 1 and ("Use item ("..nu..")") or "Use quest item")
-      r.useBtn:SetWidth(120)
-      r.useBtn:ClearAllPoints(); r.useBtn:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
-      r.useBtn:Show(); y = y + 22
+      r.useBtn:SetText(nu > 1 and ("Use item ("..nu..")") or "Use quest item"); r.useBtn:SetWidth(110)
+      r.useBtn:ClearAllPoints()
+      if hasT then r.useBtn:SetPoint("LEFT", r.targetBtn, "RIGHT", 6, 0)
+      else r.useBtn:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y) end
+      r.useBtn:Show()
     else r.useBtn:Hide() end
+    if hasT or hasU then y = y + 20 end
     h = y + 4
   else
     -- compact: hide expansion, single body with one leading type icon

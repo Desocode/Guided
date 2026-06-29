@@ -2065,6 +2065,37 @@ function RXP12.ToggleTracker()
   RXP12.ApplyTracker()
 end
 
+local OPT_TABS = { "General", "Display", "Routing", "Guides" }
+local DUNGEON_NAMES = {
+  RFC="Ragefire Chasm", WC="Wailing Caverns", DM="The Deadmines", SFK="Shadowfang Keep",
+  BFD="Blackfathom Deeps", STOCKADES="The Stockade", GNOMER="Gnomeregan", SM="Scarlet Monastery",
+  RFK="Razorfen Kraul", RFD="Razorfen Downs", ZF="Zul'Farrak", MARA="Maraudon", ST="Sunken Temple",
+  BRD="Blackrock Depths", ULDA="Uldaman",
+}
+local DUNGEON_ORDER = {
+  "RFC", "WC", "DM", "SFK", "BFD", "STOCKADES", "GNOMER", "RFK",
+  "SM", "RFD", "ULDA", "ZF", "MARA", "ST", "BRD",
+}
+local dungeonChecks = {}
+
+function RXP12.OptTab(name)
+  RXP12.optTab = name
+  for i = 1, table.getn(OPT_TABS) do
+    local nm = OPT_TABS[i]
+    local pnl = getglobal("RXP12OptPanel"..nm)
+    local btn = getglobal("RXP12OptTab"..nm)
+    if pnl then if nm == name then pnl:Show() else pnl:Hide() end end
+    if btn then if nm == name then btn:LockHighlight() else btn:UnlockHighlight() end end
+  end
+end
+
+function RXP12.RefreshDungeonChecks()
+  for i = 1, table.getn(dungeonChecks) do
+    local c = dungeonChecks[i]
+    if c and c.code then c:SetChecked(RXP12_Save.dungeons[c.code] and true or false) end
+  end
+end
+
 local function MakeCheck(parent, name, label, y, getter, setter)
   local c = CreateFrame("CheckButton", name, parent, "UICheckButtonTemplate")
   c:SetWidth(26); c:SetHeight(26)
@@ -2078,7 +2109,7 @@ end
 local function CreateOptions()
   if RXP12OptionsFrame then return end
   local f = CreateFrame("Frame", "RXP12OptionsFrame", UIParent)
-  f:SetWidth(300); f:SetHeight(322)
+  f:SetWidth(452); f:SetHeight(366)
   f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
   f:SetBackdrop({
     bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -2092,198 +2123,178 @@ local function CreateOptions()
   f:SetFrameStrata("DIALOG")
 
   local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  title:SetPoint("TOP", f, "TOP", 0, -12)
-  title:SetText("RXP12 Options")
+  title:SetPoint("TOP", f, "TOP", 0, -11); title:SetText("RXP12 Options")
+  local close = CreateFrame("Button", "RXP12OptionsClose", f, "UIPanelCloseButton")
+  close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
+  close:SetScript("OnClick", function() f:Hide() end)
 
-  MakeCheck(f, "RXP12OptAuto", "Auto-accept & turn-in quests", -36,
+  -- tab bar
+  for i = 1, table.getn(OPT_TABS) do
+    local nm = OPT_TABS[i]
+    local b = CreateFrame("Button", "RXP12OptTab"..nm, f, "UIPanelButtonTemplate")
+    b:SetWidth(104); b:SetHeight(22)
+    b:SetPoint("TOPLEFT", f, "TOPLEFT", 12 + (i - 1) * 107, -30)
+    b:SetText(nm)
+    b:SetScript("OnClick", function() RXP12.OptTab(nm) end)
+  end
+  local div = f:CreateTexture(nil, "ARTWORK")
+  div:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -56); div:SetPoint("TOPRIGHT", f, "TOPRIGHT", -10, -56)
+  div:SetHeight(1); div:SetTexture(1, 1, 1, 0.15)
+
+  local function panel(nm)
+    local pn = CreateFrame("Frame", "RXP12OptPanel"..nm, f)
+    pn:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -62)
+    pn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 12)
+    pn:Hide(); return pn
+  end
+  local pG, pD, pR, pGu = panel("General"), panel("Display"), panel("Routing"), panel("Guides")
+
+  -- ---------- General ----------
+  MakeCheck(pG, "RXP12OptAuto", "Auto-accept & turn in quests", -6,
     function() return RXP12_Save.auto end,
     function(v) RXP12_Save.auto = v
       Print("Auto quest pickup/turn-in "..(v and "|cff66cc66ON|r" or "|cffff5555OFF|r")) end)
-
-  MakeCheck(f, "RXP12OptArrow", "Show direction arrow", -60,
-    function() return RXP12_Save.arrow end,
-    function(v) RXP12_Save.arrow = v end)
-
-  MakeCheck(f, "RXP12OptLock", "Lock guide window", -84,
-    function() return RXP12_Save.locked end,
-    function(v) RXP12_Save.locked = v end)
-
-  MakeCheck(f, "RXP12OptMinimap", "Show minimap button", -108,
+  MakeCheck(pG, "RXP12OptMinimap", "Show minimap button", -34,
     function() return RXP12_Save.minimap ~= false end,
     function(v) RXP12_Save.minimap = v; RXP12.UpdateMinimapButton() end)
-
-  MakeCheck(f, "RXP12OptTracker", "Leveling tracker", -132,
+  MakeCheck(pG, "RXP12OptArrow", "Show direction arrow", -62,
+    function() return RXP12_Save.arrow end,
+    function(v) RXP12_Save.arrow = v end)
+  MakeCheck(pG, "RXP12OptLock", "Lock guide window", -90,
+    function() return RXP12_Save.locked end,
+    function(v) RXP12_Save.locked = v end)
+  MakeCheck(pG, "RXP12OptTracker", "Leveling tracker", -118,
     function() return RXP12_Save.tracker end,
     function(v) RXP12_Save.tracker = v; RXP12.ApplyTracker() end)
 
-  local s = CreateFrame("Slider", "RXP12OptScale", f, "OptionsSliderTemplate")
-  s:SetWidth(220); s:SetHeight(16)
-  s:SetPoint("TOP", f, "TOP", 0, -172)
-  s:SetMinMaxValues(0.7, 1.5)
-  s:SetValueStep(0.05)
+  -- ---------- Display ----------
+  local s = CreateFrame("Slider", "RXP12OptScale", pD, "OptionsSliderTemplate")
+  s:SetWidth(300); s:SetHeight(16); s:SetPoint("TOP", pD, "TOP", 0, -24)
+  s:SetMinMaxValues(0.7, 1.5); s:SetValueStep(0.05)
   getglobal("RXP12OptScaleLow"):SetText("0.7")
   getglobal("RXP12OptScaleHigh"):SetText("1.5")
   getglobal("RXP12OptScaleText"):SetText("Guide window scale")
   s:SetValue(RXP12_Save.scale or 1)
   s:SetScript("OnValueChanged", function()
-    local v = this:GetValue()
-    RXP12_Save.scale = v
-    if RXP12Frame then RXP12Frame:SetScale(v) end
+    RXP12_Save.scale = this:GetValue()
+    if RXP12Frame then RXP12Frame:SetScale(RXP12_Save.scale) end
   end)
-
-  local op = CreateFrame("Slider", "RXP12OptOpacity", f, "OptionsSliderTemplate")
-  op:SetWidth(220); op:SetHeight(16)
-  op:SetPoint("TOP", f, "TOP", 0, -210)
-  op:SetMinMaxValues(0, 1)
-  op:SetValueStep(0.05)
+  local op = CreateFrame("Slider", "RXP12OptOpacity", pD, "OptionsSliderTemplate")
+  op:SetWidth(300); op:SetHeight(16); op:SetPoint("TOP", pD, "TOP", 0, -72)
+  op:SetMinMaxValues(0, 1); op:SetValueStep(0.05)
   getglobal("RXP12OptOpacityLow"):SetText("0")
   getglobal("RXP12OptOpacityHigh"):SetText("1")
   getglobal("RXP12OptOpacityText"):SetText("Background opacity")
   op:SetValue(RXP12_Save.opacity or 0.92)
   op:SetScript("OnValueChanged", function()
-    local v = this:GetValue()
-    RXP12_Save.opacity = v
-    if RXP12Frame then RXP12Frame:SetBackdropColor(0.05, 0.05, 0.07, v) end
+    RXP12_Save.opacity = this:GetValue()
+    if RXP12Frame then RXP12Frame:SetBackdropColor(0.05, 0.05, 0.07, RXP12_Save.opacity) end
   end)
 
-  -- guide/feature buttons (two rows)
-  local dng = CreateFrame("Button", "RXP12OptDungeons", f, "UIPanelButtonTemplate")
-  dng:SetWidth(128); dng:SetHeight(22); dng:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -238)
-  dng:SetText("Dungeons...")
-  dng:SetScript("OnClick", function() RXP12.ShowDungeons() end)
+  -- ---------- Routing (dungeons) ----------
+  local rh = pR:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  rh:SetPoint("TOPLEFT", pR, "TOPLEFT", 2, -2); rh:SetText("Weave these dungeons into the route:")
+  for i = 1, table.getn(DUNGEON_ORDER) do
+    local code = DUNGEON_ORDER[i]
+    local c = CreateFrame("CheckButton", "RXP12DungeonChk"..i, pR, "UICheckButtonTemplate")
+    c:SetWidth(22); c:SetHeight(22)
+    local col, row = 0, i - 1
+    if i > 8 then col = 1; row = i - 9 end
+    c:SetPoint("TOPLEFT", pR, "TOPLEFT", 2 + col * 208, -22 - row * 23)
+    getglobal(c:GetName().."Text"):SetText(DUNGEON_NAMES[code] or code)
+    c.code = code
+    c:SetChecked(RXP12_Save.dungeons[code] and true or false)
+    c:SetScript("OnClick", function()
+      RXP12_Save.dungeons[this.code] = this:GetChecked() and true or nil
+      RXP12.BuildActive(); RXP12.SkipForward(); RXP12.UpdateUI()
+    end)
+    dungeonChecks[i] = c
+  end
+  local none = CreateFrame("Button", "RXP12DungeonNone", pR, "UIPanelButtonTemplate")
+  none:SetWidth(70); none:SetHeight(20); none:SetPoint("BOTTOMLEFT", pR, "BOTTOMLEFT", 2, 6); none:SetText("None")
+  none:SetScript("OnClick", function()
+    RXP12_Save.dungeons = {}; RXP12.RefreshDungeonChecks()
+    RXP12.BuildActive(); RXP12.SkipForward(); RXP12.UpdateUI()
+  end)
+  local allb = CreateFrame("Button", "RXP12DungeonAll", pR, "UIPanelButtonTemplate")
+  allb:SetWidth(70); allb:SetHeight(20); allb:SetPoint("LEFT", none, "RIGHT", 8, 0); allb:SetText("All")
+  allb:SetScript("OnClick", function()
+    for i = 1, table.getn(DUNGEON_ORDER) do RXP12_Save.dungeons[DUNGEON_ORDER[i]] = true end
+    RXP12.RefreshDungeonChecks(); RXP12.BuildActive(); RXP12.SkipForward(); RXP12.UpdateUI()
+  end)
+  local pnote = pR:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  pnote:SetPoint("BOTTOMRIGHT", pR, "BOTTOMRIGHT", -2, 10); pnote:SetJustifyH("RIGHT")
+  pnote:SetText("Professions: automatic, by skill level")
 
-  local det = CreateFrame("Button", "RXP12OptDetect", f, "UIPanelButtonTemplate")
-  det:SetWidth(128); det:SetHeight(22); det:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -238)
-  det:SetText("Auto-detect guide")
-  det:SetScript("OnClick", function()
+  -- ---------- Guides (import + actions) ----------
+  local gh = pGu:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  gh:SetPoint("TOPLEFT", pGu, "TOPLEFT", 2, -2); gh:SetWidth(404); gh:SetJustifyH("LEFT")
+  gh:SetText("Paste a guide (a RegisterGuide([[...]]) block or raw text), then Import -- loads immediately, no restart.")
+  local eb = CreateFrame("EditBox", "RXP12ImportEdit", pGu)
+  eb:SetMultiLine(true); eb:SetMaxLetters(0); eb:SetAutoFocus(false)
+  eb:SetPoint("TOPLEFT", pGu, "TOPLEFT", 2, -36)
+  eb:SetPoint("TOPRIGHT", pGu, "TOPRIGHT", -2, -36); eb:SetHeight(150)
+  eb:SetFontObject(ChatFontNormal); eb:SetJustifyH("LEFT"); eb:SetTextInsets(5, 5, 5, 5)
+  eb:SetBackdrop({
+    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile = true, tileSize = 16, edgeSize = 12,
+    insets = { left = 3, right = 3, top = 3, bottom = 3 } })
+  eb:SetBackdropColor(0, 0, 0, 0.7)
+  eb:SetScript("OnEscapePressed", function() this:ClearFocus() end)
+  local impb = CreateFrame("Button", "RXP12ImportDo", pGu, "UIPanelButtonTemplate")
+  impb:SetWidth(90); impb:SetHeight(22); impb:SetPoint("TOPLEFT", eb, "BOTTOMLEFT", 0, -8); impb:SetText("Import")
+  impb:SetScript("OnClick", function()
+    local ok, n = pcall(RXP12.ImportGuide, eb:GetText())
+    if ok and n and n > 0 then Print("Imported "..n.." guide(s)."); eb:SetText(""); RXP12.UpdateUI()
+    else Print("|cffff5050Import failed|r -- paste a guide or a RegisterGuide([[...]]) block.") end
+  end)
+  local clrb = CreateFrame("Button", "RXP12ImportClear", pGu, "UIPanelButtonTemplate")
+  clrb:SetWidth(70); clrb:SetHeight(22); clrb:SetPoint("LEFT", impb, "RIGHT", 8, 0); clrb:SetText("Clear")
+  clrb:SetScript("OnClick", function() eb:SetText("") end)
+  local detb = CreateFrame("Button", "RXP12OptDetect", pGu, "UIPanelButtonTemplate")
+  detb:SetWidth(132); detb:SetHeight(22); detb:SetPoint("BOTTOMLEFT", pGu, "BOTTOMLEFT", 2, 6)
+  detb:SetText("Auto-detect guide")
+  detb:SetScript("OnClick", function()
     local b = RXP12.AutoSelectGuide(); if b then RXP12.LoadGuideByName(b) end
   end)
-
-  local imp = CreateFrame("Button", "RXP12OptImport", f, "UIPanelButtonTemplate")
-  imp:SetWidth(128); imp:SetHeight(22); imp:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -264)
-  imp:SetText("Import guide...")
-  imp:SetScript("OnClick", function() RXP12.ShowImport() end)
-
-  local rst = CreateFrame("Button", "RXP12OptReset", f, "UIPanelButtonTemplate")
-  rst:SetWidth(128); rst:SetHeight(22); rst:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -264)
-  rst:SetText("Reset progress")
-  rst:SetScript("OnClick", function()
+  local rstb = CreateFrame("Button", "RXP12OptReset", pGu, "UIPanelButtonTemplate")
+  rstb:SetWidth(120); rstb:SetHeight(22); rstb:SetPoint("BOTTOMRIGHT", pGu, "BOTTOMRIGHT", -2, 6)
+  rstb:SetText("Reset progress")
+  rstb:SetScript("OnClick", function()
     RXP12.seen = {}; RXP12.activeStickies = {}
     if RXP12_Save.done then RXP12_Save.done[RXP12_Save.guide] = nil end
     RXP12.SetStep(1); Print("Reset to step 1.")
   end)
 
-  local note = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  note:SetPoint("BOTTOM", f, "BOTTOM", 0, 8)
-  note:SetText("Profession steps show/hide automatically from your skill levels.")
-
-  local close = CreateFrame("Button", "RXP12OptionsClose", f, "UIPanelCloseButton")
-  close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
-  close:SetScript("OnClick", function() f:Hide() end)
-
   f:Hide()
+  RXP12.OptTab("General")
 end
 
-function RXP12.ToggleOptions()
+function RXP12.ToggleOptions(tab)
   CreateOptions()
-  if RXP12OptionsFrame:IsVisible() then RXP12OptionsFrame:Hide()
-  else
-    -- sync widgets to current state before showing
-    if RXP12OptAuto then RXP12OptAuto:SetChecked(RXP12_Save.auto and true or false) end
-    if RXP12OptArrow then RXP12OptArrow:SetChecked(RXP12_Save.arrow and true or false) end
-    if RXP12OptLock then RXP12OptLock:SetChecked(RXP12_Save.locked and true or false) end
-    if RXP12OptMinimap then RXP12OptMinimap:SetChecked(RXP12_Save.minimap ~= false) end
-    if RXP12OptScale then RXP12OptScale:SetValue(RXP12_Save.scale or 1) end
-    if RXP12OptOpacity then RXP12OptOpacity:SetValue(RXP12_Save.opacity or 0.92) end
-    if RXP12OptTracker then RXP12OptTracker:SetChecked(RXP12_Save.tracker == true) end
-    RXP12OptionsFrame:Show()
+  if RXP12OptionsFrame:IsVisible() then
+    if tab then RXP12.OptTab(tab) else RXP12OptionsFrame:Hide() end
+    return
   end
+  -- sync widgets to current state before showing
+  if RXP12OptAuto then RXP12OptAuto:SetChecked(RXP12_Save.auto and true or false) end
+  if RXP12OptArrow then RXP12OptArrow:SetChecked(RXP12_Save.arrow and true or false) end
+  if RXP12OptLock then RXP12OptLock:SetChecked(RXP12_Save.locked and true or false) end
+  if RXP12OptMinimap then RXP12OptMinimap:SetChecked(RXP12_Save.minimap ~= false) end
+  if RXP12OptScale then RXP12OptScale:SetValue(RXP12_Save.scale or 1) end
+  if RXP12OptOpacity then RXP12OptOpacity:SetValue(RXP12_Save.opacity or 0.92) end
+  if RXP12OptTracker then RXP12OptTracker:SetChecked(RXP12_Save.tracker == true) end
+  RXP12.RefreshDungeonChecks()
+  RXP12.OptTab(tab or RXP12.optTab or "General")
+  RXP12OptionsFrame:Show()
 end
 
 -- ----------------------------------------------------------- guide import ----
 -- Register pasted guides at runtime (no client restart) via the same path guide
 -- files use. Accepts either raw guide text or one/more RXPGuides.RegisterGuide([[
 -- ... ]]) blocks. Persists the raw text per character so imports survive /reload.
--- ------------------------------------------------------------- dungeons UI ----
-local DUNGEON_NAMES = {
-  RFC="Ragefire Chasm", WC="Wailing Caverns", DM="The Deadmines", SFK="Shadowfang Keep",
-  BFD="Blackfathom Deeps", STOCKADES="The Stockade", GNOMER="Gnomeregan", SM="Scarlet Monastery",
-  RFK="Razorfen Kraul", RFD="Razorfen Downs", ZF="Zul'Farrak", MARA="Maraudon", ST="Sunken Temple",
-  BRD="Blackrock Depths", ULDA="Uldaman",
-}
--- global list (roughly by level) so dungeons can be configured anytime, not per-guide
-local DUNGEON_ORDER = {
-  "RFC", "WC", "DM", "SFK", "BFD", "STOCKADES", "GNOMER", "RFK", "SM",
-  "RFD", "ULDA", "ZF", "MARA", "ST", "BRD",
-}
-local dungeonChecks = {}
-
-local function CreateDungeons()
-  if RXP12DungeonFrame then return end
-  local f = CreateFrame("Frame", "RXP12DungeonFrame", UIParent)
-  f:SetWidth(230); f:SetHeight(220)
-  f:SetPoint("CENTER", UIParent, "CENTER", 140, 0)
-  f:SetFrameStrata("DIALOG")
-  f:SetBackdrop({
-    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true, tileSize = 16, edgeSize = 16,
-    insets = { left = 4, right = 4, top = 4, bottom = 4 } })
-  f:SetBackdropColor(0.05, 0.05, 0.07, 0.95)
-  f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
-  f:SetScript("OnDragStart", function() this:StartMoving() end)
-  f:SetScript("OnDragStop", function() this:StopMovingOrSizing() end)
-  local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  title:SetPoint("TOP", f, "TOP", 0, -10); title:SetText("Select Dungeons")
-  f.empty = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  f.empty:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -34); f.empty:SetWidth(200); f.empty:SetJustifyH("LEFT")
-  f.empty:SetText("No dungeons in this guide."); f.empty:Hide()
-  local none = CreateFrame("Button", "RXP12DungeonNone", f, "UIPanelButtonTemplate")
-  none:SetWidth(70); none:SetHeight(20); none:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 8); none:SetText("None")
-  none:SetScript("OnClick", function()
-    RXP12_Save.dungeons = {}; RXP12.BuildActive(); RXP12.SkipForward(); RXP12.UpdateUI(); RXP12.ShowDungeons()
-  end)
-  local all = CreateFrame("Button", "RXP12DungeonAll", f, "UIPanelButtonTemplate")
-  all:SetWidth(70); all:SetHeight(20); all:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 8); all:SetText("All")
-  all:SetScript("OnClick", function()
-    for i = 1, table.getn(DUNGEON_ORDER) do RXP12_Save.dungeons[DUNGEON_ORDER[i]] = true end
-    RXP12.BuildActive(); RXP12.SkipForward(); RXP12.UpdateUI(); RXP12.ShowDungeons()
-  end)
-  local close = CreateFrame("Button", "RXP12DungeonClose", f, "UIPanelCloseButton")
-  close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2); close:SetScript("OnClick", function() f:Hide() end)
-  f:Hide()
-end
-
-function RXP12.ShowDungeons()
-  CreateDungeons()
-  local f = RXP12DungeonFrame
-  local codes = DUNGEON_ORDER          -- full list, independent of the loaded guide
-  local n = table.getn(codes)
-  for i = 1, n do
-    local c = dungeonChecks[i]
-    if not c then
-      c = CreateFrame("CheckButton", "RXP12DungeonChk"..i, f, "UICheckButtonTemplate")
-      c:SetWidth(24); c:SetHeight(24)
-      c.label = getglobal(c:GetName().."Text")
-      c:SetScript("OnClick", function()
-        if this.code then
-          RXP12_Save.dungeons[this.code] = this:GetChecked() and true or nil
-          RXP12.BuildActive(); RXP12.SkipForward(); RXP12.UpdateUI()
-        end
-      end)
-      dungeonChecks[i] = c
-    end
-    c.code = codes[i]
-    c:ClearAllPoints(); c:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -32 - (i-1)*22)
-    c.label:SetText(DUNGEON_NAMES[codes[i]] or codes[i])
-    c:SetChecked(RXP12_Save.dungeons[codes[i]] and true or false)
-    c:Show()
-  end
-  for i = n + 1, table.getn(dungeonChecks) do dungeonChecks[i]:Hide() end
-  f.empty:Hide()
-  f:SetHeight(70 + n * 22)
-  f:Show()
-end
+function RXP12.ShowDungeons() RXP12.ToggleOptions("Routing") end
 
 function RXP12.ImportGuide(text)
   if not text or trim(text) == "" then return 0 end
@@ -2302,71 +2313,8 @@ function RXP12.ImportGuide(text)
   return n
 end
 
-local function CreateImport()
-  if RXP12ImportFrame then return end
-  local f = CreateFrame("Frame", "RXP12ImportFrame", UIParent)
-  f:SetWidth(440); f:SetHeight(320)
-  f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-  f:SetFrameStrata("DIALOG")
-  f:SetBackdrop({
-    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true, tileSize = 16, edgeSize = 16,
-    insets = { left = 4, right = 4, top = 4, bottom = 4 } })
-  f:SetBackdropColor(0.05, 0.05, 0.07, 0.95)
-  f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
-  f:SetScript("OnDragStart", function() this:StartMoving() end)
-  f:SetScript("OnDragStop", function() this:StopMovingOrSizing() end)
-
-  local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  title:SetPoint("TOP", f, "TOP", 0, -10); title:SetText("Import Guide")
-  local hint = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  hint:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -28)
-  hint:SetWidth(412); hint:SetJustifyH("LEFT")
-  hint:SetText("Paste a guide (a RegisterGuide([[...]]) block or raw guide text), then Import. "
-    .."Loads immediately -- no restart -- and is remembered for this character.")
-
-  local eb = CreateFrame("EditBox", "RXP12ImportEdit", f)
-  eb:SetMultiLine(true); eb:SetMaxLetters(0); eb:SetAutoFocus(false)
-  eb:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -54)
-  eb:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -16, 42)
-  eb:SetFontObject(ChatFontNormal)
-  eb:SetJustifyH("LEFT"); eb:SetTextInsets(5, 5, 5, 5)
-  eb:SetBackdrop({
-    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true, tileSize = 16, edgeSize = 12,
-    insets = { left = 3, right = 3, top = 3, bottom = 3 } })
-  eb:SetBackdropColor(0, 0, 0, 0.7)
-  eb:SetScript("OnEscapePressed", function() this:ClearFocus() end)
-
-  local imp = CreateFrame("Button", "RXP12ImportDo", f, "UIPanelButtonTemplate")
-  imp:SetWidth(100); imp:SetHeight(22)
-  imp:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 14, 12); imp:SetText("Import")
-  imp:SetScript("OnClick", function()
-    local ok, n = pcall(RXP12.ImportGuide, eb:GetText())
-    if ok and n and n > 0 then
-      Print("Imported "..n.." guide(s). Open the cog menu to pick them.")
-      eb:SetText(""); f:Hide(); RXP12.UpdateUI()
-    else
-      Print("|cffff5050Import failed|r -- paste a guide's text or a RegisterGuide([[...]]) block.")
-    end
-  end)
-
-  local clr = CreateFrame("Button", "RXP12ImportClear", f, "UIPanelButtonTemplate")
-  clr:SetWidth(80); clr:SetHeight(22)
-  clr:SetPoint("LEFT", imp, "RIGHT", 8, 0); clr:SetText("Clear")
-  clr:SetScript("OnClick", function() eb:SetText("") end)
-
-  local close = CreateFrame("Button", "RXP12ImportClose", f, "UIPanelCloseButton")
-  close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
-  close:SetScript("OnClick", function() f:Hide() end)
-  f:Hide()
-end
-
 function RXP12.ShowImport()
-  CreateImport()
-  RXP12ImportFrame:Show()
+  RXP12.ToggleOptions("Guides")
   if RXP12ImportEdit then RXP12ImportEdit:SetFocus() end
 end
 

@@ -1249,6 +1249,14 @@ function Guided.SkipForward()
   Guided.activeStickies = Guided.activeStickies or {}
   local log = BuildQuestLog()   -- also records "seen" titles
   local n = table.getn(Guided.active)
+  if Guided.dbgWatch and Guided.dbgWatch > 0 then            -- DEBUG abandon trace
+    Guided.dbgWatch = Guided.dbgWatch - 1
+    local s1 = Guided.active[1]
+    Guided.dbgS1 = (Guided.dbgS1 or "").." |cur="..tostring(Guided_Save.step)
+      .." stored="..tostring(Guided.IsDoneStored(s1))
+      .." isd="..tostring(Guided.IsStepDone(s1, log))
+      .." jaid="..tostring(Guided.justAbandonedId)
+  end
 
   -- unpin any sticky that's done or whose completion window has passed
   for idx in pairs(Guided.activeStickies) do
@@ -3081,6 +3089,7 @@ function AbandonQuest()
         if qs[k].action == "accept" and lc(QuestName(qs[k].id) or "") == key then
           if i < (Guided_Save.step or 1) then Guided_Save.step = i; Guided.dbgRoute = i end
           Guided.justAbandonedId = qs[k].id        -- guard this accept step against the abandon transient
+          Guided.dbgWatch = 6; Guided.dbgS1 = "route="..i   -- DEBUG abandon trace
           break
         end
       end

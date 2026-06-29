@@ -2,9 +2,10 @@
 ## Title: RXP12 |cff33ff99Lean Guide|r
 ## Notes: Lightweight, self-contained leveling-guide engine for the 1.12 client (reads RXPGuides-format guides). By Deso.
 ## Author: Deso
-## Version: 0.26-mvp
+## Version: 0.27-mvp
 ## SavedVariablesPerCharacter: RXP12_Save
 Data\QuestNames.lua
+Data\ZoneNames.lua
 RXP12.lua
 Guides\Classic-Alliance-1-13_Human.lua
 Guides\Classic-Alliance-1-10_NightElf.lua

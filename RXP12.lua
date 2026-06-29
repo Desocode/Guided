@@ -72,7 +72,8 @@ local function FormatGoto(raw)
   if f[1] and not tonumber(f[1]) then
     zone = f[1]; x = tonumber(f[2]); y = tonumber(f[3])
   elseif f[3] then
-    x = tonumber(f[2]); y = tonumber(f[3])      -- mapid,x,y
+    zone = RXP12_ZoneDB and RXP12_ZoneDB[tonumber(f[1])]   -- numeric uiMapID -> zone name
+    x = tonumber(f[2]); y = tonumber(f[3])
   else
     x = tonumber(f[1]); y = tonumber(f[2])       -- x,y (current zone)
   end
@@ -392,7 +393,10 @@ local function ParseGoto(raw)
   if table.getn(f) < 2 then return nil end
   if tonumber(f[1]) then
     if table.getn(f) >= 3 then
-      return nil, tonumber(f[1]), tonumber(f[2]), tonumber(f[3])   -- mapid,x,y
+      local mid = tonumber(f[1])
+      local zname = RXP12_ZoneDB and RXP12_ZoneDB[mid]
+      if zname then return zname, nil, tonumber(f[2]), tonumber(f[3]) end  -- uiMapID -> zone name
+      return nil, mid, tonumber(f[2]), tonumber(f[3])              -- unknown mapid,x,y
     end
     return nil, nil, tonumber(f[1]), tonumber(f[2])                -- x,y (current zone)
   end

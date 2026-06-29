@@ -244,6 +244,17 @@ function RXP12.ParseLine(step, t)
       elseif cmd == "maxlevel" then
         local _, _, ml = string.find(rest, "(%d+)")
         if ml then step.maxlevel = tonumber(ml) end       -- hide once you outlevel it
+      elseif cmd == "use" then
+        local _, _, id = string.find(rest, "(%d+)")
+        if id and not step.useitem then step.useitem = tonumber(id) end   -- quest item to use
+      elseif cmd == "target" or cmd == "mob" then
+        if not step.target then
+          local nm = rest
+          nm = string.gsub(nm, '"', "")        -- RXP uses quotes for partial match
+          nm = string.gsub(nm, "^%+", "")       -- and a leading + for "additional"
+          nm = trim(nm)
+          if nm ~= "" then step.target = nm end
+        end
       elseif disp then kind = "note"; etext = disp        -- any other command, show its text only
       end
     elseif first == "#" then
@@ -890,6 +901,23 @@ local function GetElemRow(r, j)
   return er
 end
 
+-- use a quest item by id: find it in the bags (its link carries item:<id>:) and
+-- use it. No item-name DB needed; works in combat (1.12 has no secure restrictions).
+function RXP12.UseItemById(id)
+  if not id then return end
+  for bag = 0, 4 do
+    local slots = GetContainerNumSlots(bag) or 0
+    for slot = 1, slots do
+      local link = GetContainerItemLink(bag, slot)
+      if link and string.find(link, "item:"..id..":", 1, true) then
+        UseContainerItem(bag, slot); return true
+      end
+    end
+  end
+  Print("That quest item isn't in your bags.")
+  return false
+end
+
 local function GetRow(i)
   if RXP12.rows[i] then return RXP12.rows[i] end
   local r = CreateFrame("Button", "RXP12Row"..i, RXP12ScrollChild)
@@ -930,6 +958,13 @@ local function GetRow(i)
   r.bar:SetHeight(6); r.bar:SetMinMaxValues(0, 1)
   r.bar.bg = r.bar:CreateTexture(nil, "BACKGROUND"); r.bar.bg:SetAllPoints(); r.bar.bg:SetTexture(0, 0, 0, 0.5)
   r.bar:Hide()
+  -- action buttons (shown only on the current step)
+  r.targetBtn = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
+  r.targetBtn:SetHeight(18); r.targetBtn:Hide()
+  r.targetBtn:SetScript("OnClick", function() if this.tname then TargetByName(this.tname) end end)
+  r.useBtn = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
+  r.useBtn:SetHeight(18); r.useBtn:SetWidth(120); r.useBtn:SetText("Use quest item"); r.useBtn:Hide()
+  r.useBtn:SetScript("OnClick", function() if this.uid then RXP12.UseItemById(this.uid) end end)
   r:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
   local hl = r:GetHighlightTexture(); if hl then hl:SetVertexColor(1, 1, 1, 0.08) end
   -- left-click does nothing; RIGHT-click opens the menu (with a "Go to step" option)
@@ -1042,10 +1077,24 @@ local function RenderRow(r, step, i, cur)
       end
       if n > 0 then RXP12.Advance() end
     end
+    -- Target / Use action buttons
+    if step.target then
+      r.targetBtn.tname = step.target
+      r.targetBtn:SetText("Target: "..step.target)
+      local w = 64 + string.len(step.target) * 6; if w > CONTENT_W then w = CONTENT_W end
+      r.targetBtn:SetWidth(w)
+      r.targetBtn:ClearAllPoints(); r.targetBtn:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
+      r.targetBtn:Show(); y = y + 22
+    else r.targetBtn:Hide() end
+    if step.useitem then
+      r.useBtn.uid = step.useitem
+      r.useBtn:ClearAllPoints(); r.useBtn:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
+      r.useBtn:Show(); y = y + 22
+    else r.useBtn:Hide() end
     h = y + 4
   else
     -- compact: hide expansion, single body with one leading type icon
-    r.bar:Hide()
+    r.bar:Hide(); r.targetBtn:Hide(); r.useBtn:Hide()
     if r.elems then local k = 1; while r.elems[k] do r.elems[k]:Hide(); k = k + 1 end end
     local ip
     for j = 1, table.getn(step.elements or {}) do
@@ -1105,7 +1154,7 @@ function RXP12.UpdateUI()
     getglobal("RXP12FrameTitle"):SetText("RXP12 -- no guide")
     getglobal("RXP12FrameCounter"):SetText("")
     if RXP12FrameClassIcon then RXP12FrameClassIcon:Hide() end
-    local r = GetRow(1); r.stepIndex = nil; r.bg:Hide(); r.accent:Hide(); r.num:Hide(); r.check:Hide(); r.bar:Hide(); r.kindIcon:Hide()
+    local r = GetRow(1); r.stepIndex = nil; r.bg:Hide(); r.accent:Hide(); r.num:Hide(); r.check:Hide(); r.bar:Hide(); r.kindIcon:Hide(); r.targetBtn:Hide(); r.useBtn:Hide()
     if r.elems then local k=1; while r.elems[k] do r.elems[k]:Hide(); k=k+1 end end
     r.fs:ClearAllPoints(); r.fs:SetPoint("TOPLEFT", r, "TOPLEFT", 8, -4); r.fs:SetWidth(ROW_WIDTH - 16)
     r.fs:Show(); r.fs:SetAlpha(1)

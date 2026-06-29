@@ -186,6 +186,12 @@ function RXP12.BuildActive()
   table.sort(RXP12.dungeonCodes)
   local n = table.getn(RXP12.active)
   if (RXP12_Save.step or 1) > n then RXP12_Save.step = (n > 0 and n) or 1 end
+  -- step numbers skip sticky "side" steps (helpers, not main numbered steps)
+  RXP12.dispNum = {}; RXP12.numMain = 0
+  for i = 1, n do
+    if RXP12.active[i].sticky then RXP12.dispNum[i] = nil
+    else RXP12.numMain = RXP12.numMain + 1; RXP12.dispNum[i] = RXP12.numMain end
+  end
 end
 
 -- resolve a quest id to its name via the bundled quest-name DB (Data\QuestNames.lua).
@@ -1344,7 +1350,8 @@ local function RenderRow(r, step, i, cur, expand)
   r.stepIndex = i
 
   -- badge + status styling
-  r.num:SetText(tostring(i))
+  local dn = RXP12.dispNum and RXP12.dispNum[i]
+  if dn then r.num:SetText(tostring(dn)) end
   if isCur then
     r.bg:Show(); r.bg:SetTexture(0.16, 0.42, 0.85, 0.16)
     r.accent:Show(); r.accent:SetTexture(0.3, 1, 0.3, 0.9)
@@ -1359,6 +1366,7 @@ local function RenderRow(r, step, i, cur, expand)
   end
   local dim = (i < cur and not active)
   r.num:SetAlpha(dim and 0.5 or 1)
+  if dn then r.num:Show(); r.badgeBg:Show() else r.num:Hide(); r.badgeBg:Hide() end
   r.numStrike:Hide(); r.fsStrike:Hide()
 
   local h
@@ -1539,7 +1547,7 @@ function RXP12.UpdateUI()
   getglobal("RXP12FrameTitle"):SetText(g.name)
   local n = table.getn(RXP12.active)
   local cur = RXP12_Save.step or 1
-  getglobal("RXP12FrameCounter"):SetText(cur.." / "..n)
+  getglobal("RXP12FrameCounter"):SetText((RXP12.dispNum and RXP12.dispNum[cur] or cur).." / "..(RXP12.numMain or n))
 
   -- header class icon
   if RXP12FrameClassIcon then

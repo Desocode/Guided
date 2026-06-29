@@ -214,7 +214,7 @@ function RXP12.ParseLine(step, t)
   if disp == "" then disp = nil end
   if disp then tinsert(step.text, Sanitize(disp)) end
 
-  local kind, etext, eid, eobj = nil, disp, nil, nil
+  local kind, etext, eid, eobj, eauto = nil, disp, nil, nil, nil
 
   if pre == "" then
     if disp then kind = "note" end                       -- a plain ">>text" note
@@ -229,13 +229,11 @@ function RXP12.ParseLine(step, t)
         -- RXP form: ".accept <id>", ".turnin <id>", ".complete <id>,<objective>"
         local _, _, id, obj = string.find(rest, "(%d+),?(%d*)")
         eid = tonumber(id); eobj = tonumber(obj)
-        tinsert(step.quests, { action = cmd, id = eid, obj = eobj, cond = lineCond })
+        local _, _, tnum = string.find(rest, "%(x?(%d+)%)")    -- target count from "(x7)"
+        tinsert(step.quests, { action = cmd, id = eid, obj = eobj, cond = lineCond, target = tonumber(tnum) })
         kind = cmd
         if not etext then
-          -- no ">>text": prefer the line's trailing "--comment" (RXP guides use it
-          -- to describe the objective, e.g. "Kill Young Nightsaber (x7)"). This also
-          -- keeps multiple .complete objectives distinct instead of rendering as
-          -- identical "Complete: <quest>" lines.
+          if cmd == "complete" then eauto = true end           -- comment-only objective: fold onto the note
           local _, _, cmt = string.find(rest, "%-%-%s*(.+)")
           if cmt and trim(cmt) ~= "" then
             etext = trim(cmt)
@@ -312,7 +310,7 @@ function RXP12.ParseLine(step, t)
   end
 
   if kind and etext and etext ~= "" then
-    tinsert(step.elements, { kind = kind, text = Sanitize(etext), id = eid, obj = eobj, cond = lineCond })
+    tinsert(step.elements, { kind = kind, text = Sanitize(etext), id = eid, obj = eobj, cond = lineCond, auto = eauto })
   end
 end
 
@@ -936,6 +934,32 @@ local function ElementLineWithCount(el)
   return line
 end
 
+local function StepHasNote(step)
+  for j = 1, table.getn(step.elements or {}) do
+    local el = step.elements[j]
+    if el.kind == "note" and CondOK(el.cond) then return true end
+  end
+  return false
+end
+
+-- combined counts for a step's .complete objectives: live "3/7, 1/4" when the
+-- quest is in the log, else the target totals. Returned colored, or nil.
+local function StepCounts(step, live)
+  local q = step.quests; if not q then return nil end
+  local parts = {}
+  for k = 1, table.getn(q) do
+    local it = q[k]
+    if it.action == "complete" and it.obj and CondOK(it.cond) then
+      local pr
+      if live then pr = ObjectiveCount(it.id, it.obj) end
+      if not pr and it.target then pr = it.target end
+      if pr then tinsert(parts, tostring(pr)) end
+    end
+  end
+  if table.getn(parts) == 0 then return nil end
+  return "|cffffe080"..table.concat(parts, ", ").."|r"
+end
+
 local function ObjectiveProgress(step)
   local done, total = 0, 0
   if not step or table.getn(step.quests) == 0 then return 0, 0 end
@@ -1135,10 +1159,12 @@ local function RenderRow(r, step, i, cur)
     local y = 2
     local els = step.elements or {}
     local nEls = table.getn(els)
+    local hasNote = StepHasNote(step)
+    local summary = hasNote and StepCounts(step, true) or nil
     local vis = 0
     for j = 1, nEls do
       local el = els[j]
-      if CondOK(el.cond) then                                -- per-line "<< cond" gate
+      if CondOK(el.cond) and not (el.auto and hasNote) then   -- skip folded completes
         vis = vis + 1
         local er = GetElemRow(r, vis)
         er.element = el
@@ -1149,7 +1175,9 @@ local function RenderRow(r, step, i, cur)
         local fx = 22
         if ip then er.icon:SetTexture(ip); er.icon:Show(); fx = 37 else er.icon:Hide() end
         er.fs:ClearAllPoints(); er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", fx, -2); er.fs:SetWidth(CONTENT_W - fx)
-        er.fs:SetText(ElementLineWithCount(el))
+        local txt = ElementLineWithCount(el)
+        if el.kind == "note" and summary then txt = txt.."  "..summary; summary = nil end
+        er.fs:SetText(txt)
         er.check:SetChecked(el.checked and true or false)
         local eh = FSHeight(er.fs); if eh < 18 then eh = 18 end
         er:SetWidth(CONTENT_W); er:SetHeight(eh)
@@ -1181,7 +1209,7 @@ local function RenderRow(r, step, i, cur)
       local n = 0
       for k = 1, table.getn(step.elements or {}) do
         local el = step.elements[k]
-        if CondOK(el.cond) then
+        if CondOK(el.cond) and not (el.auto and hasNote) then
           n = n + 1
           if not el.checked then return end
         end
@@ -1221,10 +1249,16 @@ local function RenderRow(r, step, i, cur)
     else
       r.kindIcon:Hide()
     end
+    local hasNote = StepHasNote(step)
+    local summary = hasNote and StepCounts(step, active) or nil
     local lines = {}
+    local injected = false
     for j = 1, table.getn(step.elements or {}) do
-      if CondOK(step.elements[j].cond) then
-        tinsert(lines, active and ElementLineWithCount(step.elements[j]) or ElementLine(step.elements[j]))
+      local el = step.elements[j]
+      if CondOK(el.cond) and not (el.auto and hasNote) then
+        local line = active and ElementLineWithCount(el) or ElementLine(el)
+        if el.kind == "note" and not injected and summary then line = line.."  "..summary; injected = true end
+        tinsert(lines, line)
       end
     end
     local body = table.concat(lines, "\n")

@@ -560,8 +560,18 @@ end
 
 -- handle a quest/gossip frame event when auto mode is on. pcall'd by caller.
 function RXP12.HandleQuestEvent(e)
+  if RXP12.debug then
+    local na = (GetNumGossipAvailableQuests and GetNumGossipAvailableQuests()) or "?"
+    Print("|cff88ccff[dbg]|r "..e.." auto="..tostring(RXP12_Save and RXP12_Save.auto)
+      .." title='"..tostring((GetTitleText and GetTitleText()) or "").."' gossipAvail="..tostring(na))
+  end
   if not RXP12_Save or not RXP12_Save.auto then return end
   local accept, turnin = RXP12.WantedQuests()
+  if RXP12.debug then
+    local list = ""
+    for k in pairs(accept) do list = list..k.."; " end
+    Print("|cff88ccff[dbg]|r want-accept: "..(list ~= "" and list or "(none)"))
+  end
 
   if e == "QUEST_DETAIL" then
     if accept[lc(GetTitleText())] then AcceptQuest() end
@@ -1426,6 +1436,9 @@ SlashCmdList["RXP12"] = function(msg)
     RXP12_Save.auto = not RXP12_Save.auto
     if RXP12OptAuto then RXP12OptAuto:SetChecked(RXP12_Save.auto and true or false) end
     Print("Auto quest pickup/turn-in "..(RXP12_Save.auto and "|cff66cc66ON|r" or "|cffff5555OFF|r"))
+  elseif cmd == "debug" then
+    RXP12.debug = not RXP12.debug
+    Print("Debug "..(RXP12.debug and "|cff66cc66ON|r -- talk to a quest NPC and watch chat" or "|cffff5555OFF|r"))
   elseif cmd == "detect" then
     local best = RXP12.AutoSelectGuide()
     if best then

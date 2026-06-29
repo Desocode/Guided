@@ -132,11 +132,32 @@ function RXP12.DungeonCheck(step)
   return true
 end
 
+-- map of the player's tradeskill ranks (normalized name -> rank) for .skill gates
+function RXP12.BuildSkillMap()
+  local m = {}
+  local n = (GetNumSkillLines and GetNumSkillLines()) or 0
+  for i = 1, n do
+    local name, isHeader, _, rank = GetSkillLineInfo(i)
+    if name and not isHeader then m[normalize(name)] = rank or 0 end
+  end
+  return m
+end
+
+function RXP12.SkillCheck(step)
+  local sk = step.skill
+  if not sk then return true end
+  local rank = (RXP12.skillMap and RXP12.skillMap[sk.name]) or 0
+  if sk.min then return rank >= sk.min end
+  if sk.max then return rank < sk.max end
+  return true
+end
+
 function RXP12.BuildActive()
   RXP12.active = {}
   RXP12.labelIndex = {}      -- step #label -> index in active (for #completewith <label>)
   RXP12.activeStickies = {}  -- index -> true: sticky steps pinned & not yet done
   RXP12.dungeonCodes = {}    -- distinct dungeon codes present in this guide (for the picker)
+  RXP12.skillMap = RXP12.BuildSkillMap()
   local g = RXP12.CurrentGuide()
   if not g then return end
   RXP12.EnsureParsed(g)
@@ -146,7 +167,8 @@ function RXP12.BuildActive()
     if st.dungeon and not seenD[st.dungeon] then seenD[st.dungeon] = true; tinsert(RXP12.dungeonCodes, st.dungeon) end
     if st.dungeonskip and not seenD[st.dungeonskip] then seenD[st.dungeonskip] = true; tinsert(RXP12.dungeonCodes, st.dungeonskip) end
     if RXP12.EvalCondition(st.cond) and RXP12.DungeonCheck(st)
-        and (not st.maxlevel or UnitLevel("player") <= st.maxlevel) then
+        and (not st.maxlevel or UnitLevel("player") <= st.maxlevel)
+        and RXP12.SkillCheck(st) then
       tinsert(RXP12.active, st)
       local s = RXP12.active[table.getn(RXP12.active)]
       if s.label and s.label ~= true then RXP12.labelIndex[s.label] = table.getn(RXP12.active) end
@@ -245,6 +267,13 @@ function RXP12.ParseLine(step, t)
       elseif cmd == "maxlevel" then
         local _, _, ml = string.find(rest, "(%d+)")
         if ml then step.maxlevel = tonumber(ml) end       -- hide once you outlevel it
+      elseif cmd == "skill" then
+        local _, _, nm, lt, num = string.find(rest, "([%a%s]+),%s*(<?)(%d+)")
+        if nm and num then
+          step.skill = { name = normalize(nm),
+            min = (lt == "<") and tonumber(num) or nil,    -- show if rank >= N
+            max = (lt ~= "<") and tonumber(num) or nil }   -- show if rank <  N
+        end
       elseif cmd == "use" then
         local _, _, id = string.find(rest, "(%d+)")
         id = tonumber(id)
@@ -2029,6 +2058,7 @@ ev:RegisterEvent("QUEST_LOG_UPDATE")
 ev:RegisterEvent("UNIT_QUEST_LOG_CHANGED")
 ev:RegisterEvent("PLAYER_LEVEL_UP")
 ev:RegisterEvent("PLAYER_XP_UPDATE")
+ev:RegisterEvent("SKILL_LINES_CHANGED")
 ev:RegisterEvent("QUEST_DETAIL")      -- auto quest interaction (gated on RXP12_Save.auto)
 ev:RegisterEvent("QUEST_PROGRESS")
 ev:RegisterEvent("QUEST_COMPLETE")
@@ -2073,6 +2103,12 @@ local function OnEvent()
     end
     RXP12.CheckAuto()
     RXP12.UpdateUI()
+  elseif event == "SKILL_LINES_CHANGED" then
+    -- re-filter .skill-gated steps when a profession changes (skip mid-combat to
+    -- avoid churn from weapon-skill ups)
+    if not (UnitAffectingCombat and UnitAffectingCombat("player")) then
+      RXP12.BuildActive(); RXP12.CheckAuto(); RXP12.UpdateUI()
+    end
   elseif event == "PLAYER_XP_UPDATE" then
     local t = RXP12.trk
     if t then

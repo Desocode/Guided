@@ -854,30 +854,34 @@ local function RenderRow(r, step, i, cur)
     local y = 2
     local els = step.elements or {}
     local nEls = table.getn(els)
+    local vis = 0
     for j = 1, nEls do
       local el = els[j]
-      local er = GetElemRow(r, j)
-      er.element = el
-      er.tip = el.text
-      er.check:Show()
-      er:SetScript("OnClick", er._onclick)
-      local ip = KIND_ICON[el.kind]
-      local fx = 22
-      if ip then er.icon:SetTexture(ip); er.icon:Show(); fx = 37 else er.icon:Hide() end
-      er.fs:ClearAllPoints(); er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", fx, -2); er.fs:SetWidth(CONTENT_W - fx)
-      er.fs:SetText(ElementLine(el))
-      er.check:SetChecked(el.checked and true or false)
-      local eh = FSHeight(er.fs); if eh < 18 then eh = 18 end
-      er:SetWidth(CONTENT_W); er:SetHeight(eh)
-      er:ClearAllPoints(); er:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
-      er:Show()
-      y = y + eh + 3
+      if CondOK(el.cond) then                                -- per-line "<< cond" gate
+        vis = vis + 1
+        local er = GetElemRow(r, vis)
+        er.element = el
+        er.tip = el.text
+        er.check:Show()
+        er:SetScript("OnClick", er._onclick)
+        local ip = KIND_ICON[el.kind]
+        local fx = 22
+        if ip then er.icon:SetTexture(ip); er.icon:Show(); fx = 37 else er.icon:Hide() end
+        er.fs:ClearAllPoints(); er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", fx, -2); er.fs:SetWidth(CONTENT_W - fx)
+        er.fs:SetText(ElementLine(el))
+        er.check:SetChecked(el.checked and true or false)
+        local eh = FSHeight(er.fs); if eh < 18 then eh = 18 end
+        er:SetWidth(CONTENT_W); er:SetHeight(eh)
+        er:ClearAllPoints(); er:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
+        er:Show()
+        y = y + eh + 3
+      end
     end
     -- objective progress text lines (no checkbox)
     local ok, objl = pcall(ObjectiveLines, step)
     if ok and objl and table.getn(objl) > 0 then
-      local j = nEls + 1
-      local er = GetElemRow(r, j); er.element = nil; er.tip = nil
+      vis = vis + 1
+      local er = GetElemRow(r, vis); er.element = nil; er.tip = nil
       er.check:Hide(); er.icon:Hide()
       er:SetScript("OnClick", nil)
       er.fs:ClearAllPoints(); er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", 4, -2); er.fs:SetWidth(CONTENT_W - 4)
@@ -887,14 +891,10 @@ local function RenderRow(r, step, i, cur)
       er:ClearAllPoints(); er:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
       er:Show()
       y = y + eh + 3
-      r.objRow = j
-    else
-      r.objRow = nil
     end
     -- hide leftover element rows
-    local hideFrom = nEls + 1 + (r.objRow and 1 or 0)
     if r.elems then
-      local k = hideFrom
+      local k = vis + 1
       while r.elems[k] do r.elems[k]:Hide(); k = k + 1 end
     end
     -- progress bar
@@ -909,12 +909,17 @@ local function RenderRow(r, step, i, cur)
     else
       r.bar:Hide()
     end
-    -- auto-advance when every element is ticked
+    -- auto-advance when every APPLICABLE element is ticked
     r.onToggle = function()
+      local n = 0
       for k = 1, table.getn(step.elements or {}) do
-        if not step.elements[k].checked then return end
+        local el = step.elements[k]
+        if CondOK(el.cond) then
+          n = n + 1
+          if not el.checked then return end
+        end
       end
-      if table.getn(step.elements or {}) > 0 then RXP12.Advance() end
+      if n > 0 then RXP12.Advance() end
     end
     h = y + 4
   else
@@ -923,8 +928,8 @@ local function RenderRow(r, step, i, cur)
     if r.elems then local k = 1; while r.elems[k] do r.elems[k]:Hide(); k = k + 1 end end
     local ip
     for j = 1, table.getn(step.elements or {}) do
-      local ic = KIND_ICON[step.elements[j].kind]
-      if ic then ip = ic; break end
+      local el = step.elements[j]
+      if CondOK(el.cond) then local ic = KIND_ICON[el.kind]; if ic then ip = ic; break end end
     end
     local fx = CONTENT_X
     if ip then
@@ -933,7 +938,9 @@ local function RenderRow(r, step, i, cur)
       r.kindIcon:Hide()
     end
     local lines = {}
-    for j = 1, table.getn(step.elements or {}) do tinsert(lines, ElementLine(step.elements[j])) end
+    for j = 1, table.getn(step.elements or {}) do
+      if CondOK(step.elements[j].cond) then tinsert(lines, ElementLine(step.elements[j])) end
+    end
     local body = table.concat(lines, "\n")
     if body == "" then body = "|cff777777(no description)|r" end
     r.fs:ClearAllPoints(); r.fs:SetPoint("TOPLEFT", r, "TOPLEFT", fx, -4); r.fs:SetWidth(ROW_WIDTH - fx - 6)

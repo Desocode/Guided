@@ -754,7 +754,12 @@ function RXP12.IsStepDone(step, log)
           if not ObjectiveDone(entry.idx, q.obj) then return false end -- objective not done
         elseif not entry.complete then return false end       -- whole quest not complete
       elseif q.action == "turnin" then
-        if not (RXP12.seen[key] and not entry) then return false end -- seen, now gone = turned in
+        if RXP12.seen[key] and not entry then                       -- seen, now gone = turned in
+          RXP12_Save.doneQuests = RXP12_Save.doneQuests or {}
+          if q.id then RXP12_Save.doneQuests[q.id] = true end       -- remember the hand-in (persisted)
+        else
+          return false
+        end
       end
     end
   end
@@ -770,9 +775,21 @@ end
 -- it stays skipped after /reload (covers turn-ins the quest log no longer shows).
 -- Only SkipForward records these -- never a manual jump.
 function RXP12.IsDoneStored(s)
-  if not s or not s.gindex or not RXP12_Save.guide then return false end
-  local d = RXP12_Save.done and RXP12_Save.done[RXP12_Save.guide]
-  return (d and d[s.gindex]) and true or false
+  -- "done" persists only for quests we've OBSERVED handed in -- never for steps
+  -- merely advanced past (accept/kill/gate). A step counts done once every quest
+  -- it references has been turned in.
+  if not s or not s.quests or table.getn(s.quests) == 0 then return false end
+  local dq = RXP12_Save.doneQuests
+  if not dq then return false end
+  local any = false
+  for k = 1, table.getn(s.quests) do
+    local q = s.quests[k]
+    if CondOK(q.cond) and q.id then
+      any = true
+      if not dq[q.id] then return false end
+    end
+  end
+  return any
 end
 function RXP12.RecordDone(s)
   if not s or not s.gindex or not RXP12_Save.guide then return end
@@ -2347,7 +2364,8 @@ local function Defaults()
   if RXP12_Save.scale == nil then RXP12_Save.scale = 1 end
   if RXP12_Save.opacity == nil then RXP12_Save.opacity = 0.92 end
   if RXP12_Save.dungeons == nil then RXP12_Save.dungeons = {} end
-  if RXP12_Save.done == nil then RXP12_Save.done = {} end   -- per-guide [gindex]=true (auto-completed)
+  if RXP12_Save.done == nil then RXP12_Save.done = {} end   -- legacy (unused)
+  if RXP12_Save.doneQuests == nil then RXP12_Save.doneQuests = {} end  -- [questId]=true: observed hand-ins
   if RXP12_Save.minimap == nil then RXP12_Save.minimap = true end
   if RXP12_Save.splits == nil then RXP12_Save.splits = {} end
   if RXP12_Save.tracker == nil then RXP12_Save.tracker = false end

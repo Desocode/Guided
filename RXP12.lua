@@ -835,6 +835,27 @@ local function FSHeight(fs)
 end
 
 -- overall objective progress for a step (done, total) read from the quest log
+-- live "x/y" count + done flag for a single quest objective (for inline display).
+local function ObjectiveCount(qid, obj)
+  local nm = QuestName(qid); if not nm then return nil, nil end
+  nm = lc(nm)
+  local sel = GetQuestLogSelection()
+  local total = GetNumQuestLogEntries()
+  local cnt, done
+  for i = 1, total do
+    local title, _, _, isHeader = GetQuestLogTitle(i)
+    if title and not isHeader and lc(title) == nm then
+      SelectQuestLogEntry(i)
+      local txt, _, d = GetQuestLogLeaderBoard(obj)
+      done = d
+      if txt then local _, _, c = string.find(txt, "(%d+%s*/%s*%d+)"); cnt = c end
+      break
+    end
+  end
+  if sel then SelectQuestLogEntry(sel) end
+  return cnt, done
+end
+
 local function ObjectiveProgress(step)
   local done, total = 0, 0
   if not step or table.getn(step.quests) == 0 then return 0, 0 end
@@ -1028,7 +1049,13 @@ local function RenderRow(r, step, i, cur)
         local fx = 22
         if ip then er.icon:SetTexture(ip); er.icon:Show(); fx = 37 else er.icon:Hide() end
         er.fs:ClearAllPoints(); er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", fx, -2); er.fs:SetWidth(CONTENT_W - fx)
-        er.fs:SetText(ElementLine(el))
+        local line = ElementLine(el)
+        if el.kind == "complete" and el.id and el.obj then
+          local cnt, edone = ObjectiveCount(el.id, el.obj)        -- show "3/7" right on the line
+          if cnt then line = line.."  |c"..(edone and "ff66cc66" or "ffffe080")..cnt.."|r"
+          elseif edone then line = line.."  |cff66cc66done|r" end
+        end
+        er.fs:SetText(line)
         er.check:SetChecked(el.checked and true or false)
         local eh = FSHeight(er.fs); if eh < 18 then eh = 18 end
         er:SetWidth(CONTENT_W); er:SetHeight(eh)
@@ -1037,21 +1064,7 @@ local function RenderRow(r, step, i, cur)
         y = y + eh + 3
       end
     end
-    -- objective progress text lines (no checkbox)
-    local ok, objl = pcall(ObjectiveLines, step)
-    if ok and objl and table.getn(objl) > 0 then
-      vis = vis + 1
-      local er = GetElemRow(r, vis); er.element = nil; er.tip = nil
-      er.check:Hide(); er.icon:Hide()
-      er:SetScript("OnClick", nil)
-      er.fs:ClearAllPoints(); er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", 4, -2); er.fs:SetWidth(CONTENT_W - 4)
-      er.fs:SetText(table.concat(objl, "\n"))
-      local eh = FSHeight(er.fs); if eh < 12 then eh = 12 end
-      er:SetWidth(CONTENT_W); er:SetHeight(eh)
-      er:ClearAllPoints(); er:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
-      er:Show()
-      y = y + eh + 3
-    end
+    -- (objective counts are shown inline on each .complete line above)
     -- hide leftover element rows
     if r.elems then
       local k = vis + 1
@@ -1383,7 +1396,10 @@ end
 local function CreateUI()
   if RXP12Frame then return end
   local f = CreateFrame("Frame", "RXP12Frame", UIParent)
-  f:SetWidth(340); f:SetHeight(340)   -- fixed panel
+  f:SetWidth(340); f:SetHeight(RXP12_Save.h or 340)   -- width fixed; height resizable
+  f:SetResizable(true)
+  if f.SetMinResize then f:SetMinResize(340, 170) end
+  if f.SetMaxResize then f:SetMaxResize(340, 900) end
   if RXP12_Save.pos then
     f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", RXP12_Save.pos.x, RXP12_Save.pos.y)
   else
@@ -1440,7 +1456,7 @@ local function CreateUI()
   -- scrolling step list
   local sf = CreateFrame("ScrollFrame", "RXP12ScrollFrame", f)
   sf:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -34)
-  sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 12)
+  sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 16)
   local cchild = CreateFrame("Frame", "RXP12ScrollChild", sf)
   cchild:SetWidth(ROW_WIDTH); cchild:SetHeight(1)
   sf:SetScrollChild(cchild)
@@ -1450,6 +1466,26 @@ local function CreateUI()
   local close = CreateFrame("Button", "RXP12FrameClose", f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
   close:SetScript("OnClick", function() RXP12.Hide() end)
+
+  -- vertical resize handle: drag the bottom edge up/down (width stays fixed)
+  local grip = CreateFrame("Button", "RXP12FrameGrip", f)
+  grip:SetWidth(48); grip:SetHeight(9)
+  grip:SetPoint("BOTTOM", f, "BOTTOM", 0, 4)
+  grip.tex = grip:CreateTexture(nil, "OVERLAY")
+  grip.tex:SetAllPoints(); grip.tex:SetTexture("Interface\\Buttons\\WHITE8X8")
+  grip.tex:SetVertexColor(1, 1, 1, 0.22)
+  grip:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
+  local ghl = grip:GetHighlightTexture(); if ghl then ghl:SetVertexColor(1, 1, 1, 0.18) end
+  grip:SetScript("OnMouseDown", function() if not RXP12_Save.locked then f:StartSizing("BOTTOM") end end)
+  grip:SetScript("OnMouseUp", function()
+    f:StopMovingOrSizing()
+    RXP12_Save.h = f:GetHeight()
+    RXP12.UpdateUI()
+  end)
+  grip:SetScript("OnEnter", function()
+    GameTooltip:SetOwner(this, "ANCHOR_TOP"); GameTooltip:SetText("Drag to resize height", 1, 1, 1); GameTooltip:Show()
+  end)
+  grip:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 
   RXP12.UpdateUI()

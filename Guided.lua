@@ -1904,6 +1904,20 @@ function Guided.ToggleMenu()
   Guided.OpenMenu(nil, "GuidedFrameCog")
 end
 
+function Guided.ApplyScale()
+  local f = GuidedFrame; if not f then return end
+  f:SetScale(BASE_SCALE * (Guided_Save.scale or 1))
+  f:ClearAllPoints()
+  local pos = Guided_Save.pos
+  if pos and pos.x and pos.y then
+    local eff = f:GetEffectiveScale(); if not eff or eff <= 0 then eff = 1 end
+    -- pos is stored in screen pixels; convert to this frame's (scaled) anchor units
+    f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", pos.x / eff, pos.y / eff)
+  else
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
+  end
+end
+
 function Guided.ApplyStepAnchor()
   local sfr = GuidedStepFrame; if not sfr or not GuidedFrame then return end
   sfr:ClearAllPoints()
@@ -1923,11 +1937,7 @@ local function CreateUI()
   f:SetResizable(true)
   if f.SetMinResize then f:SetMinResize(310, 170) end
   if f.SetMaxResize then f:SetMaxResize(310, 900) end
-  if Guided_Save.pos then
-    f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", Guided_Save.pos.x, Guided_Save.pos.y)
-  else
-    f:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
-  end
+  f:SetPoint("CENTER", UIParent, "CENTER", 0, 80)   -- initial; Guided.ApplyScale() re-anchors to the saved (screen-space) pos
   f:SetBackdrop({
     bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
     edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -1938,7 +1948,8 @@ local function CreateUI()
   f:SetScript("OnDragStart", function() if not Guided_Save.locked then this:StartMoving() end end)
   f:SetScript("OnDragStop", function()
     this:StopMovingOrSizing()
-    Guided_Save.pos = { x = this:GetLeft(), y = this:GetTop() }
+    local eff = this:GetEffectiveScale(); if not eff or eff <= 0 then eff = 1 end
+    Guided_Save.pos = { x = this:GetLeft() * eff, y = this:GetTop() * eff }   -- screen pixels
   end)
   f:SetScript("OnMouseUp", function() if arg1 == "RightButton" then Guided.OpenMenu(nil, "cursor") end end)
 
@@ -2286,7 +2297,7 @@ local function CreateOptions()
     if v then
       if v < 0.5 then v = 0.5 elseif v > 2 then v = 2 end
       Guided_Save.scale = v
-      if GuidedFrame then GuidedFrame:SetScale(BASE_SCALE * v) end
+      Guided.ApplyScale()
     end
     s:SetText(string.format("%.3g", Guided_Save.scale or 1))
   end
@@ -2485,6 +2496,7 @@ local function Defaults()
   if Guided_Save.locked == nil then Guided_Save.locked = false end
   if Guided_Save.scale == nil then Guided_Save.scale = 1 end
   if not Guided_Save.scaleV2 then Guided_Save.scale = 1; Guided_Save.scaleV2 = true end  -- one-time reset to the 1.0 baseline; BASE_SCALE renders it at the original size
+  if not Guided_Save.posV2 then Guided_Save.pos = nil; Guided_Save.posV2 = true end       -- old pos was saved in scaled units; reset once to the new screen-pixel scheme
   if Guided_Save.opacity == nil then Guided_Save.opacity = 0.92 end
   if Guided_Save.dungeons == nil then Guided_Save.dungeons = {} end
   if Guided_Save.done == nil then Guided_Save.done = {} end   -- legacy (unused)
@@ -2578,7 +2590,7 @@ local function OnEvent()
     Guided.trk = { t0 = GetTime(), xp = 0, lastXP = UnitXP("player") or 0,
                   lastMax = UnitXPMax("player") or 1, lvlStart = GetTime() }
     Guided.ApplyTracker()
-    if Guided_Save.scale and GuidedFrame then GuidedFrame:SetScale(BASE_SCALE * Guided_Save.scale) end
+    Guided.ApplyScale()
     if Guided_Save.shown then Guided.Show() else Guided.Hide() end
     Guided.SkipForward()   -- resume at the first not-yet-completed step
     Print("loaded. Guide: |cffffd200"..(Guided_Save.guide or "none")

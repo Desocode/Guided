@@ -626,6 +626,21 @@ function RXP12.ArrowGoto()
   return nil
 end
 
+-- vanilla zone widths in yards (maps are a fixed 1.5:1 aspect, so height = w/1.5).
+-- Used to turn the map-percent delta into a real yard distance for the waypoint.
+local ZONE_YARDS = {
+  ["Elwynn Forest"]=3471,["Westfall"]=3500,["Redridge Mountains"]=2722,["Duskwood"]=2700,
+  ["Stranglethorn Vale"]=6381,["Dun Morogh"]=4925,["Loch Modan"]=2738,["Wetlands"]=4135,
+  ["Tirisfal Glades"]=4519,["Silverpine Forest"]=4200,["Hillsbrad Foothills"]=3203,
+  ["Arathi Highlands"]=3601,["Western Plaguelands"]=4031,["Eastern Plaguelands"]=4380,
+  ["The Hinterlands"]=3850,["Searing Gorge"]=2231,["Burning Steppes"]=2920,["Badlands"]=2349,
+  ["Swamp of Sorrows"]=2293,["Blasted Lands"]=3346,["Deadwind Pass"]=2266,["Alterac Mountains"]=2723,
+  ["Durotar"]=5037,["Mulgore"]=4662,["The Barrens"]=10135,["Teldrassil"]=3912,["Darkshore"]=6550,
+  ["Ashenvale"]=5766,["Stonetalon Mountains"]=4581,["Desolace"]=4496,["Dustwallow Marsh"]=5250,
+  ["Feralas"]=6949,["Thousand Needles"]=4399,["Tanaris"]=6899,["Un'Goro Crater"]=3681,
+  ["Silithus"]=3483,["Felwood"]=5750,["Winterspring"]=7099,["Azshara"]=6357,["Moonglade"]=2308,
+}
+
 function RXP12.ArrowUpdate(elapsed)
   if not RXP12Arrow then return end
   arrowThrottle = arrowThrottle - (elapsed or 0)
@@ -654,7 +669,9 @@ function RXP12.ArrowUpdate(elapsed)
   if px == 0 and py == 0 then model:Hide(); txt:SetText(""); return end
 
   local ddx, ddy = tx - px*100, ty - py*100
-  local dist = math.sqrt(ddx*ddx + ddy*ddy)
+  local w = ZONE_YARDS[GetRealZoneText() or ""] or 3500   -- zone width in yards (default mid-size)
+  local yx, yy = ddx / 100 * w, ddy / 100 * (w / 1.5)     -- maps are 1.5:1
+  local dist = math.sqrt(yx*yx + yy*yy)
   local dir = atan2(ddx*1.5, -(ddy))
   dir = dir > 0 and (math.pi*2) - dir or -dir
   if dir < 0 then dir = dir + 360 end
@@ -663,8 +680,8 @@ function RXP12.ArrowUpdate(elapsed)
   local column, row = mymod(cell, 9), math.floor(cell / 9)
   model:SetTexCoord((column*56)/512, ((column+1)*56)/512, (row*42)/512, ((row+1)*42)/512)
   model:Show()
-  if dist < 1 then txt:SetText("|cff66cc66Arrived|r")
-  else txt:SetText(string.format("%d", dist)) end
+  if dist < 12 then txt:SetText("|cff66cc66Arrived|r")
+  else txt:SetText(string.format("%d yd", dist)) end
 end
 
 local function CreateArrow()

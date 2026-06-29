@@ -171,9 +171,18 @@ function RXP12.ParseLine(step, t)
         tinsert(step.quests, { action = cmd, id = eid, obj = eobj, cond = lineCond })
         kind = cmd
         if not etext then
-          local nm = QuestName(eid)
-          local verb = (cmd == "accept" and "Accept") or (cmd == "turnin" and "Turn in") or "Complete"
-          etext = verb..(nm and (": "..nm) or (" quest "..(eid or "?")))
+          -- no ">>text": prefer the line's trailing "--comment" (RXP guides use it
+          -- to describe the objective, e.g. "Kill Young Nightsaber (x7)"). This also
+          -- keeps multiple .complete objectives distinct instead of rendering as
+          -- identical "Complete: <quest>" lines.
+          local _, _, cmt = string.find(rest, "%-%-%s*(.+)")
+          if cmt and trim(cmt) ~= "" then
+            etext = trim(cmt)
+          else
+            local nm = QuestName(eid)
+            local verb = (cmd == "accept" and "Accept") or (cmd == "turnin" and "Turn in") or "Complete"
+            etext = verb..(nm and (": "..nm) or (" quest "..(eid or "?")))
+          end
         end
       elseif cmd == "fp" or cmd == "getfp" then kind = "fp"; etext = disp or "Get the flight point"
       elseif cmd == "fly" or cmd == "taxi" then kind = "fly"; etext = disp or ("Fly to "..rest)
@@ -764,6 +773,7 @@ local function GetElemRow(r, j)
   er._onclick = function() er.check:SetChecked(not er.check:GetChecked()); toggle() end
   er.check:SetScript("OnClick", toggle)
   er:SetScript("OnClick", er._onclick)
+  er:SetScript("OnMouseUp", function() if arg1 == "RightButton" then RXP12.ToggleMenu() end end)
   er:SetScript("OnEnter", function()
     if er.tip then GameTooltip:SetOwner(er, "ANCHOR_RIGHT"); GameTooltip:SetText(er.tip, 1, 1, 1, 1, 1); GameTooltip:Show() end
   end)
@@ -815,6 +825,7 @@ local function GetRow(i)
   r:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
   local hl = r:GetHighlightTexture(); if hl then hl:SetVertexColor(1, 1, 1, 0.08) end
   r:SetScript("OnClick", function() if this.stepIndex then RXP12.SetStep(this.stepIndex) end end)
+  r:SetScript("OnMouseUp", function() if arg1 == "RightButton" then RXP12.ToggleMenu() end end)
   r:SetScript("OnEnter", function()
     if this.tip then GameTooltip:SetOwner(this, "ANCHOR_RIGHT"); GameTooltip:SetText(this.tip, 1, 1, 1, 1, 1); GameTooltip:Show() end
   end)
@@ -1009,6 +1020,11 @@ function RXP12.UpdateUI()
     else RXP12FrameClassIcon:Hide() end
   end
 
+  -- follow the (resizable) frame width so rows fill the scroll area
+  if RXP12ScrollFrame then
+    local w = RXP12ScrollFrame:GetWidth()
+    if w and w > 80 then ROW_WIDTH = math.floor(w); CONTENT_W = ROW_WIDTH - CONTENT_X - 6 end
+  end
   RXP12.rowY = {}
   local y = 0
   for i = 1, n do
@@ -1174,7 +1190,10 @@ end
 local function CreateUI()
   if RXP12Frame then return end
   local f = CreateFrame("Frame", "RXP12Frame", UIParent)
-  f:SetWidth(340); f:SetHeight(340)
+  f:SetWidth(RXP12_Save.w or 340); f:SetHeight(RXP12_Save.h or 340)
+  f:SetResizable(true)
+  if f.SetMinResize then f:SetMinResize(260, 170) end
+  if f.SetMaxResize then f:SetMaxResize(640, 900) end
   if RXP12_Save.pos then
     f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", RXP12_Save.pos.x, RXP12_Save.pos.y)
   else
@@ -1192,6 +1211,7 @@ local function CreateUI()
     this:StopMovingOrSizing()
     RXP12_Save.pos = { x = this:GetLeft(), y = this:GetTop() }
   end)
+  f:SetScript("OnMouseUp", function() if arg1 == "RightButton" then RXP12.ToggleMenu() end end)
 
   -- header: cog menu + class icon + guide name + counter, with a divider line
   local cog = CreateFrame("Button", "RXP12FrameCog", f)
@@ -1245,13 +1265,27 @@ local function CreateUI()
 
   local next = CreateFrame("Button", "RXP12FrameNext", f, "UIPanelButtonTemplate")
   next:SetWidth(70); next:SetHeight(20)
-  next:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 8)
+  next:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -22, 8)
   next:SetText("Next >")
   next:SetScript("OnClick", function() RXP12.Advance() end)
 
   local close = CreateFrame("Button", "RXP12FrameClose", f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
   close:SetScript("OnClick", function() RXP12.Hide() end)
+
+  -- resize grip: drag the bottom-right corner (disabled while the window is locked)
+  local grip = CreateFrame("Button", "RXP12FrameGrip", f)
+  grip:SetWidth(16); grip:SetHeight(16)
+  grip:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -4, 5)
+  grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+  grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+  grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+  grip:SetScript("OnMouseDown", function() if not RXP12_Save.locked then f:StartSizing("BOTTOMRIGHT") end end)
+  grip:SetScript("OnMouseUp", function()
+    f:StopMovingOrSizing()
+    RXP12_Save.w = f:GetWidth(); RXP12_Save.h = f:GetHeight()
+    RXP12.UpdateUI()
+  end)
 
   RXP12.UpdateUI()
 end

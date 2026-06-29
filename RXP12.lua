@@ -446,18 +446,31 @@ function RXP12.CurrentStep()
   return RXP12.active and RXP12.active[RXP12_Save.step or 1] or nil
 end
 
-function RXP12.SetStep(i)
+function RXP12.SetStep(i, dir)
   if not RXP12.active then return end
   local n = table.getn(RXP12.active)
   if n == 0 then return end
   if i < 1 then i = 1 end
   if i > n then i = n end
+  -- never rest on a step that's already done -- a satisfied .xp gate, or a quest
+  -- we've OBSERVED completed (RXP12_Save.done). Step over it in the direction of
+  -- travel. Manually-ticked steps aren't recorded, so they stay visitable.
+  dir = dir or 1
+  local log = RXP12.BuildQuestLog and RXP12.BuildQuestLog()
+  local guard = 0
+  while guard < 500 do
+    if RXP12.StepDoneByIndex(i, log) then
+      local ni = i + dir
+      if ni < 1 or ni > n then break end
+      i = ni; guard = guard + 1
+    else break end
+  end
   RXP12_Save.step = i
   RXP12.UpdateUI()
 end
 
-function RXP12.Advance() RXP12.SetStep((RXP12_Save.step or 1) + 1) end
-function RXP12.Back()    RXP12.SetStep((RXP12_Save.step or 1) - 1) end
+function RXP12.Advance() RXP12.SetStep((RXP12_Save.step or 1) + 1, 1) end
+function RXP12.Back()    RXP12.SetStep((RXP12_Save.step or 1) - 1, -1) end
 
 -- cycle-target the current step's mobs (one per call). Bind via a macro: /rxp12 target
 function RXP12.TargetStep()
@@ -668,7 +681,8 @@ end
 --   log[name] = { idx = logIndex, complete = bool }
 -- also records every seen title (for turn-in = seen-then-gone detection).
 -- Guide quest ids are matched to this by resolving id -> name via the bundled DB.
-local function BuildQuestLog()
+local BuildQuestLog
+BuildQuestLog = function()
   local log = {}
   local n = GetNumQuestLogEntries()
   for i = 1, n do
@@ -681,6 +695,7 @@ local function BuildQuestLog()
   end
   return log
 end
+RXP12.BuildQuestLog = BuildQuestLog   -- exposed so SetStep (defined earlier) can use it
 
 -- is objective `obj` of the quest at log index `li` finished?
 -- uses SelectQuestLogEntry + restore (portable: works on Kronos and Turtle)
@@ -1678,7 +1693,7 @@ function RXP12.MenuInit()
     if RXP12.menuStep then
       local target = RXP12.menuStep
       info = {}; info.text = "Go to step "..target; info.notCheckable = 1
-      info.func = function() RXP12.SetStep(target); CloseDropDownMenus() end
+      info.func = function() RXP12.SetStep(target, target < (RXP12_Save.step or 1) and -1 or 1); CloseDropDownMenus() end
       UIDropDownMenu_AddButton(info, 1)
     end
     info = {}; info.text = "RXP12"; info.isTitle = 1; info.notCheckable = 1

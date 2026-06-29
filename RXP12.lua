@@ -472,6 +472,23 @@ end
 local SHEET = "Interface\\AddOns\\RXP12\\img\\arrow"
 local arrowThrottle = 0
 
+-- where the arrow points: the current step's goto; if it has none (e.g. a "grind"
+-- step), fall back to an active sticky's goto so it still points at the kill area.
+function RXP12.ArrowGoto()
+  local step = RXP12.CurrentStep()
+  if step and step.gotos and step.gotos[1] then return step.gotos[1] end
+  if RXP12.activeStickies and RXP12.active then
+    local order = {}
+    for idx in pairs(RXP12.activeStickies) do tinsert(order, idx) end
+    table.sort(order)
+    for o = 1, table.getn(order) do
+      local sk = RXP12.active[order[o]]
+      if sk and sk.gotos and sk.gotos[1] then return sk.gotos[1] end
+    end
+  end
+  return nil
+end
+
 function RXP12.ArrowUpdate(elapsed)
   if not RXP12Arrow then return end
   arrowThrottle = arrowThrottle - (elapsed or 0)
@@ -483,7 +500,7 @@ function RXP12.ArrowUpdate(elapsed)
   if RXP12_Save and RXP12_Save.arrow == false then model:Hide(); txt:SetText(""); return end
 
   local step = RXP12.CurrentStep()
-  local gs = step and step.gotos and step.gotos[1]
+  local gs = RXP12.ArrowGoto()
   if not gs then model:Hide(); txt:SetText(""); return end
   local zone, mapid, tx, ty = ParseGoto(gs)
   if not tx or not ty then model:Hide(); txt:SetText(""); return end
@@ -878,6 +895,18 @@ local function ObjectiveCount(qid, obj)
   return cnt, done
 end
 
+-- element line plus its live "x/y" count (used for .complete lines on the current
+-- step AND on pinned sticky steps).
+local function ElementLineWithCount(el)
+  local line = ElementLine(el)
+  if el.kind == "complete" and el.id and el.obj then
+    local cnt, edone = ObjectiveCount(el.id, el.obj)
+    if cnt then line = line.."  |c"..(edone and "ff66cc66" or "ffffe080")..cnt.."|r"
+    elseif edone then line = line.."  |cff66cc66done|r" end
+  end
+  return line
+end
+
 local function ObjectiveProgress(step)
   local done, total = 0, 0
   if not step or table.getn(step.quests) == 0 then return 0, 0 end
@@ -1090,13 +1119,7 @@ local function RenderRow(r, step, i, cur)
         local fx = 22
         if ip then er.icon:SetTexture(ip); er.icon:Show(); fx = 37 else er.icon:Hide() end
         er.fs:ClearAllPoints(); er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", fx, -2); er.fs:SetWidth(CONTENT_W - fx)
-        local line = ElementLine(el)
-        if el.kind == "complete" and el.id and el.obj then
-          local cnt, edone = ObjectiveCount(el.id, el.obj)        -- show "3/7" right on the line
-          if cnt then line = line.."  |c"..(edone and "ff66cc66" or "ffffe080")..cnt.."|r"
-          elseif edone then line = line.."  |cff66cc66done|r" end
-        end
-        er.fs:SetText(line)
+        er.fs:SetText(ElementLineWithCount(el))
         er.check:SetChecked(el.checked and true or false)
         local eh = FSHeight(er.fs); if eh < 18 then eh = 18 end
         er:SetWidth(CONTENT_W); er:SetHeight(eh)
@@ -1170,7 +1193,9 @@ local function RenderRow(r, step, i, cur)
     end
     local lines = {}
     for j = 1, table.getn(step.elements or {}) do
-      if CondOK(step.elements[j].cond) then tinsert(lines, ElementLine(step.elements[j])) end
+      if CondOK(step.elements[j].cond) then
+        tinsert(lines, active and ElementLineWithCount(step.elements[j]) or ElementLine(step.elements[j]))
+      end
     end
     local body = table.concat(lines, "\n")
     if body == "" then body = "|cff777777(no description)|r" end

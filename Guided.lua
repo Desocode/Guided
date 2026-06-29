@@ -620,8 +620,12 @@ local function GetMapPin(i)
   local f = CreateFrame("Frame", "GuidedMapPin"..i, parent)
   f:SetFrameStrata("FULLSCREEN_DIALOG")   -- above WorldMapButton so hover (OnEnter) fires
   f:EnableMouse(true)
+  f:SetWidth(18); f:SetHeight(18)
   local bg = f:CreateTexture(nil, "BACKGROUND")
-  bg:SetAllPoints(f); f.bg = bg
+  bg:SetAllPoints(f)
+  bg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")   -- soft circle
+  bg:SetVertexColor(0, 0, 0); bg:SetAlpha(0.3)                 -- very faint, transparent
+  f.bg = bg
   local num = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   num:SetPoint("CENTER", f, "CENTER", 0, 0); num:SetTextColor(1, 1, 1)
   f.num = num
@@ -654,9 +658,12 @@ local function DisplayedZoneName()
   return zones[z]
 end
 
--- pixel radius within which two step pins are merged into one cluster (Questie-style
--- grouping; RXP doesn't cluster -- it draws one pin per waypoint).
+-- map-pin tuning. PIN_CLUSTER_PX: merge radius for grouping nearby waypoints.
+-- PIN_LOOKAHEAD: how many steps ahead of the current one to scan (RXP caps map pins
+-- the same way via numMapPins, default 7). PIN_MAX: most grouped markers drawn.
 local PIN_CLUSTER_PX = 18
+local PIN_LOOKAHEAD  = 60
+local PIN_MAX        = 8
 
 function Guided.UpdateWorldMapPins()
   for i = 1, table.getn(mapPins) do mapPins[i]:Hide() end
@@ -670,24 +677,27 @@ function Guided.UpdateWorldMapPins()
   if not w or w == 0 then return end
   local cur = Guided_Save.step
   local active = Guided.active or {}
+  local last = table.getn(active)
 
-  -- 1) collect candidate points in the shown zone (active order = route order)
+  -- 1) candidate gotos in the shown zone: current step + a look-ahead window, plus
+  --    any active stickies (which can sit behind the current step). NOT past steps.
   local pts = {}
-  for ai = 1, table.getn(active) do
-    local st = active[ai]
-    local gs = st.gotos and st.gotos[1]
-    if gs then
-      local zone, _, tx, ty = ParseGoto(gs)
-      if zone and tx and ty and normalize(zone) == snorm then
-        tinsert(pts, { ai = ai, st = st, num = Guided.dispNum and Guided.dispNum[ai],
-                       px = (tx / 100) * w, py = (ty / 100) * h })
-        if table.getn(pts) >= 200 then break end
-      end
+  local function consider(ai)
+    local st = active[ai]; if not st then return end
+    local gs = st.gotos and st.gotos[1]; if not gs then return end
+    local zone, _, tx, ty = ParseGoto(gs)
+    if zone and tx and ty and normalize(zone) == snorm then
+      tinsert(pts, { ai = ai, num = Guided.dispNum and Guided.dispNum[ai], st = st,
+                     px = (tx / 100) * w, py = (ty / 100) * h })
     end
   end
+  if Guided.activeStickies then
+    for ai in pairs(Guided.activeStickies) do if ai < cur then consider(ai) end end
+  end
+  local stop = cur + PIN_LOOKAHEAD; if stop > last then stop = last end
+  for ai = cur, stop do consider(ai) end
 
-  -- 2) greedy proximity clustering: each unused point seeds a cluster that absorbs
-  --    any other unused point within PIN_CLUSTER_PX (good enough for <=200 pins).
+  -- 2) greedy proximity grouping (RXP-style); draw at most PIN_MAX grouped markers.
   local npts = table.getn(pts)
   local used = {}
   local r2 = PIN_CLUSTER_PX * PIN_CLUSTER_PX
@@ -706,20 +716,21 @@ function Guided.UpdateWorldMapPins()
         end
       end
       ci = ci + 1
-      if ci > 80 then break end
+      if ci > PIN_MAX then break end
       local count = table.getn(cl)
       local pin = GetMapPin(ci)
       pin.steps = cl                                        -- for the hover tooltip
-      local hasCur, lead = false, cl[1]                     -- cl[1] = earliest step (route order)
-      for k = 1, count do if cl[k].ai == cur then hasCur = true end end
-      local label = (lead.num and tostring(lead.num)) or ""
-      if count > 1 then label = label.."+" end              -- grouped marker
-      pin.num:SetText(label)
-      if hasCur then
-        pin.bg:SetTexture(0.1, 0.85, 0.1, 0.9); pin:SetWidth(22); pin:SetHeight(22)    -- current here = green
-      else
-        pin.bg:SetTexture(0.12, 0.3, 0.75, 0.85); pin:SetWidth(16); pin:SetHeight(16)  -- others = blue
+      local hasCur, minNum = false, nil
+      for k = 1, count do
+        if cl[k].ai == cur then hasCur = true end
+        local nm = cl[k].num
+        if nm and (not minNum or nm < minNum) then minNum = nm end   -- lowest step number in the group
       end
+      local label
+      if minNum then label = tostring(minNum); if count > 1 then label = label.."+" end
+      else label = (count > 1 and "+") or "*" end           -- group of unnumbered side steps
+      pin.num:SetText(label)
+      if hasCur then pin.num:SetTextColor(0.3, 1, 0.3) else pin.num:SetTextColor(1, 1, 1) end  -- current = green
       pin:ClearAllPoints()
       pin:SetPoint("CENTER", parent, "TOPLEFT", sx / count, -(sy / count))   -- average position
       pin:Show()

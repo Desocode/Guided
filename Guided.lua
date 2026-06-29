@@ -623,8 +623,8 @@ local function GetMapPin(i)
   f:SetWidth(18); f:SetHeight(18)
   local bg = f:CreateTexture(nil, "BACKGROUND")
   bg:SetAllPoints(f)
-  bg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")   -- soft circle
-  bg:SetVertexColor(0, 0, 0); bg:SetAlpha(0.3)                 -- very faint, transparent
+  bg:SetTexture("Interface\\Buttons\\WHITE8X8")   -- reliable solid backing
+  bg:SetVertexColor(0, 0, 0); bg:SetAlpha(0.25)   -- a little background, very low opacity
   f.bg = bg
   local num = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   num:SetPoint("CENTER", f, "CENTER", 0, 0); num:SetTextColor(1, 1, 1)
@@ -662,8 +662,9 @@ end
 -- PIN_LOOKAHEAD: how many steps ahead of the current one to scan (RXP caps map pins
 -- the same way via numMapPins, default 7). PIN_MAX: most grouped markers drawn.
 local PIN_CLUSTER_PX = 18
-local PIN_LOOKAHEAD  = 60
-local PIN_MAX        = 8
+local PIN_LOOKAHEAD  = 7    -- max waypoints shown ahead of the current step (RXP numMapPins ~ 7)
+local PIN_SCAN       = 80   -- how many steps ahead to scan to find those waypoints
+local PIN_MAX        = 8    -- hard safety cap on grouped markers
 
 function Guided.UpdateWorldMapPins()
   for i = 1, table.getn(mapPins) do mapPins[i]:Hide() end
@@ -692,10 +693,15 @@ function Guided.UpdateWorldMapPins()
     end
   end
   if Guided.activeStickies then
-    for ai in pairs(Guided.activeStickies) do if ai < cur then consider(ai) end end
+    for ai in pairs(Guided.activeStickies) do
+      if ai < cur and table.getn(pts) < PIN_LOOKAHEAD then consider(ai) end
+    end
   end
-  local stop = cur + PIN_LOOKAHEAD; if stop > last then stop = last end
-  for ai = cur, stop do consider(ai) end
+  local stop = cur + PIN_SCAN; if stop > last then stop = last end
+  for ai = cur, stop do
+    if table.getn(pts) >= PIN_LOOKAHEAD then break end   -- only the next few waypoints
+    consider(ai)
+  end
 
   -- 2) greedy proximity grouping (RXP-style); draw at most PIN_MAX grouped markers.
   local npts = table.getn(pts)

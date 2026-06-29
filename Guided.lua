@@ -597,17 +597,50 @@ end
 -- the goto x,y (0-100) map straight onto WorldMapDetailFrame (the actual map image),
 -- so no cross-map translation is needed. Pooled; current step highlighted green.
 -- (Cross-continent placement would need Astrolabe's static zone tables; deferred.)
+-- one-line summary of a step for the map tooltip (first element/note, colors stripped)
+local function StepSummaryText(st)
+  if not st then return "" end
+  local t
+  if st.elements then
+    for k = 1, table.getn(st.elements) do
+      if st.elements[k].text and st.elements[k].text ~= "" then t = st.elements[k].text; break end
+    end
+  end
+  if not t and st.text then t = st.text[1] end
+  if not t then return "" end
+  t = string.gsub(t, "|c%x%x%x%x%x%x%x%x", "")
+  t = string.gsub(t, "|r", "")
+  return t
+end
+
 local mapPins = {}
 local function GetMapPin(i)
   if mapPins[i] then return mapPins[i] end
   local parent = WorldMapDetailFrame or WorldMapButton
   local f = CreateFrame("Frame", "GuidedMapPin"..i, parent)
-  f:SetFrameStrata("FULLSCREEN_DIALOG")
+  f:SetFrameStrata("FULLSCREEN_DIALOG")   -- above WorldMapButton so hover (OnEnter) fires
+  f:EnableMouse(true)
   local bg = f:CreateTexture(nil, "BACKGROUND")
   bg:SetAllPoints(f); f.bg = bg
   local num = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   num:SetPoint("CENTER", f, "CENTER", 0, 0); num:SetTextColor(1, 1, 1)
   f.num = num
+  f:SetScript("OnEnter", function()
+    if not this.steps then return end
+    GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+    local steps = this.steps
+    local total = table.getn(steps)
+    local cap = total > 10 and 10 or total
+    for k = 1, cap do
+      local p = steps[k]
+      GameTooltip:AddLine(p.num and ("Step "..p.num) or "Side step", 1, 0.82, 0)
+      local d = StepSummaryText(p.st)
+      if d ~= "" then GameTooltip:AddLine("  "..d, 0.9, 0.9, 0.9) end
+    end
+    if total > cap then GameTooltip:AddLine("...and "..(total - cap).." more", 0.6, 0.6, 0.6) end
+    GameTooltip:Show()
+  end)
+  f:SetScript("OnLeave", function() GameTooltip:Hide() end)
   mapPins[i] = f
   return f
 end
@@ -621,6 +654,10 @@ local function DisplayedZoneName()
   return zones[z]
 end
 
+-- pixel radius within which two step pins are merged into one cluster (Questie-style
+-- grouping; RXP doesn't cluster -- it draws one pin per waypoint).
+local PIN_CLUSTER_PX = 18
+
 function Guided.UpdateWorldMapPins()
   for i = 1, table.getn(mapPins) do mapPins[i]:Hide() end
   if not WorldMapFrame or not WorldMapFrame:IsVisible() then return end
@@ -633,27 +670,59 @@ function Guided.UpdateWorldMapPins()
   if not w or w == 0 then return end
   local cur = Guided_Save.step
   local active = Guided.active or {}
-  local n = 0
+
+  -- 1) collect candidate points in the shown zone (active order = route order)
+  local pts = {}
   for ai = 1, table.getn(active) do
     local st = active[ai]
     local gs = st.gotos and st.gotos[1]
     if gs then
       local zone, _, tx, ty = ParseGoto(gs)
-      if zone and tx and ty and normalize(zone) == snorm then   -- this step is in the shown zone
-        n = n + 1
-        if n > 80 then break end                            -- bound the pin count
-        local pin = GetMapPin(n)
-        local label = Guided.dispNum and Guided.dispNum[ai]
-        pin.num:SetText(label and tostring(label) or "")    -- main steps numbered; stickies just dotted
-        if ai == cur then
-          pin.bg:SetTexture(0.1, 0.85, 0.1, 0.9); pin:SetWidth(22); pin:SetHeight(22)   -- current = green
-        else
-          pin.bg:SetTexture(0.12, 0.3, 0.75, 0.85); pin:SetWidth(16); pin:SetHeight(16) -- others = blue
-        end
-        pin:ClearAllPoints()
-        pin:SetPoint("CENTER", parent, "TOPLEFT", (tx / 100) * w, -(ty / 100) * h)
-        pin:Show()
+      if zone and tx and ty and normalize(zone) == snorm then
+        tinsert(pts, { ai = ai, st = st, num = Guided.dispNum and Guided.dispNum[ai],
+                       px = (tx / 100) * w, py = (ty / 100) * h })
+        if table.getn(pts) >= 200 then break end
       end
+    end
+  end
+
+  -- 2) greedy proximity clustering: each unused point seeds a cluster that absorbs
+  --    any other unused point within PIN_CLUSTER_PX (good enough for <=200 pins).
+  local npts = table.getn(pts)
+  local used = {}
+  local r2 = PIN_CLUSTER_PX * PIN_CLUSTER_PX
+  local ci = 0
+  for i = 1, npts do
+    if not used[i] then
+      used[i] = true
+      local cl = { pts[i] }
+      local sx, sy = pts[i].px, pts[i].py
+      for j = i + 1, npts do
+        if not used[j] then
+          local dx, dy = pts[i].px - pts[j].px, pts[i].py - pts[j].py
+          if (dx * dx + dy * dy) <= r2 then
+            used[j] = true; tinsert(cl, pts[j]); sx = sx + pts[j].px; sy = sy + pts[j].py
+          end
+        end
+      end
+      ci = ci + 1
+      if ci > 80 then break end
+      local count = table.getn(cl)
+      local pin = GetMapPin(ci)
+      pin.steps = cl                                        -- for the hover tooltip
+      local hasCur, lead = false, cl[1]                     -- cl[1] = earliest step (route order)
+      for k = 1, count do if cl[k].ai == cur then hasCur = true end end
+      local label = (lead.num and tostring(lead.num)) or ""
+      if count > 1 then label = label.."+" end              -- grouped marker
+      pin.num:SetText(label)
+      if hasCur then
+        pin.bg:SetTexture(0.1, 0.85, 0.1, 0.9); pin:SetWidth(22); pin:SetHeight(22)    -- current here = green
+      else
+        pin.bg:SetTexture(0.12, 0.3, 0.75, 0.85); pin:SetWidth(16); pin:SetHeight(16)  -- others = blue
+      end
+      pin:ClearAllPoints()
+      pin:SetPoint("CENTER", parent, "TOPLEFT", sx / count, -(sy / count))   -- average position
+      pin:Show()
     end
   end
 end

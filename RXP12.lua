@@ -1460,7 +1460,7 @@ local function RenderRow(r, step, i, cur, expand)
         er:SetWidth(CONTENT_W); er:SetHeight(eh)
         er:ClearAllPoints(); er:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
         er:Show()
-        y = y + eh + (vis > 1 and 1 or 3)   -- substeps tight; a little space under the top line
+        y = y + eh + (vis > 1 and 0 or 3)   -- substeps flush; a little space under the top line
       end
     end
     -- (objective counts are shown inline on each .complete line above)

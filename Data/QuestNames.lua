@@ -1,7 +1,7 @@
 -- RXP12 bundled quest-name DB (id -> title), extracted from pfQuest enUS data.
 -- Titles only (no descriptions/objectives) so RXP12 needs no pfQuest at runtime.
 -- Regenerate via scratchpad/extract_questnames.py if the source DB changes.
-RXP12_QuestDB = {
+Guided_QuestDB = {
 [2]="Sharptalon\'s Claw",[5]="Jitters\' Growling Gut",[6]="Bounty on Garrick Padfoot",[7]="Kobold Camp Cleanup",[8]="A Rogue\'s Deal",[9]="The Killing Fields",[10]="The Scrimshank Redemption",[11]="Riverpaw Gnoll Bounty",
 [12]="The People\'s Militia",[13]="The People\'s Militia",[14]="The People\'s Militia",[15]="Investigate Echo Ridge",[16]="Give Gerard a Drink",[17]="Uldaman Reagent Run",[18]="Brotherhood of Thieves",[19]="Tharil\'zun",
 [20]="Blackrock Menace",[21]="Skirmish at Echo Ridge",[22]="Goretusk Liver Pie",[23]="Ursangous\'s Paw",[24]="Shadumbra\'s Head",[25]="Stonetalon Standstill",[26]="A Lesson to Learn",[27]="A Lesson to Learn",

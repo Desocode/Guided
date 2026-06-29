@@ -1,12 +1,12 @@
 ## Interface: 11200
-## Title: RXP12 |cff33ff99Lean Guide|r
-## Notes: Lightweight, self-contained leveling-guide engine for the 1.12 client (reads RXPGuides-format guides). By Deso.
+## Title: Guided |cff33ff99Leveling Guide|r
+## Notes: Lightweight, self-contained leveling guide for vanilla (1.12). By Deso.
 ## Author: Deso
-## Version: 0.76-mvp
-## SavedVariablesPerCharacter: RXP12_Save
+## Version: 0.77
+## SavedVariablesPerCharacter: Guided_Save, RXP12_Save
 Data\QuestNames.lua
 Data\ZoneNames.lua
-RXP12.lua
+Guided.lua
 Guides\Classic-Alliance-1-13_Human.lua
 Guides\Classic-Alliance-1-10_NightElf.lua
 Guides\Classic-Alliance-1-14_DwarfGnome.lua

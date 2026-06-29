@@ -1,4 +1,4 @@
---[[ RXP12 -- lean leveling-guide engine for the WoW 1.12 (vanilla) client.
+--[[ Guided -- lean leveling-guide engine for the WoW 1.12 (vanilla) client.
 
   Parses RXPGuides-format guide text (the `step` / `.goto` / `.accept` DSL) and
   drives the steps with manual Next/Prev plus best-effort auto-advance off the
@@ -14,10 +14,10 @@
   Status: MVP. Syntax-checked only -- not tested in-game yet.
 ]]--
 
-RXP12 = {}
-RXP12.guides = {}        -- name -> parsed guide
-RXP12.guideOrder = {}    -- registration order
-RXP12.seen = {}          -- quest names ever seen in the log (for turn-in detection)
+Guided = {}
+Guided.guides = {}        -- name -> parsed guide
+Guided.guideOrder = {}    -- registration order
+Guided.seen = {}          -- quest names ever seen in the log (for turn-in detection)
 
 local PLAYER_CLASS       -- class token, e.g. "MAGE"
 
@@ -29,7 +29,7 @@ local function trim(s)
 end
 
 local function Print(msg)
-  DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99RXP12|r: "..msg)
+  DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99Guided|r: "..msg)
 end
 
 -- RXP guides use custom colour tokens (|cRXP_FRIENDLY_..|r) that are NOT valid
@@ -50,13 +50,13 @@ local function Sanitize(s)
   end)
   -- vanilla 1.12 does NOT support inline texture escapes (|T..|t) in FontStrings
   -- (added in a later client) -- they render as literal text. Strip them all;
-  -- RXP12 shows type icons via real Texture objects instead.
+  -- Guided shows type icons via real Texture objects instead.
   s = string.gsub(s, "|T[^|]*|t", "")
   return s
 end
 
 -- player identity for "<<" class/race/faction step filtering (set at login)
-RXP12.me = { class = "", race = "", faction = "" }
+Guided.me = { class = "", race = "", faction = "" }
 
 local function normalize(s) return string.gsub(string.lower(s or ""), "%s", "") end
 local function mymod(a, b) return a - math.floor(a / b) * b end
@@ -81,7 +81,7 @@ local function FormatGoto(raw)
   if f[1] and not tonumber(f[1]) then
     zone = f[1]; x = tonumber(f[2]); y = tonumber(f[3])
   elseif f[3] then
-    zone = RXP12_ZoneDB and RXP12_ZoneDB[tonumber(f[1])]   -- numeric uiMapID -> zone name
+    zone = Guided_ZoneDB and Guided_ZoneDB[tonumber(f[1])]   -- numeric uiMapID -> zone name
     x = tonumber(f[2]); y = tonumber(f[3])
   else
     x = tonumber(f[1]); y = tonumber(f[2])       -- x,y (current zone)
@@ -94,19 +94,19 @@ local function FormatGoto(raw)
 end
 
 -- guides gate steps by client/version with "<<" tokens (era/sod/tbc/...). On a
--- 1.12 / Turtle client we ARE vanilla-era content; everything else is absent, so
+-- 1.12 vanilla client we ARE vanilla-era content; everything else is absent, so
 -- "sod"/"som"/"tbc"/"wotlk"/"cata"/"mop"/"retail"/"df" tokens evaluate false.
 local CLIENT_TRAITS = { classic = true, era = true, vanilla = true }
 local function MatchToken(tok)
   local nx = normalize(tok)
-  return nx == RXP12.me.class or nx == RXP12.me.race or nx == RXP12.me.faction
+  return nx == Guided.me.class or nx == Guided.me.race or nx == Guided.me.faction
       or CLIENT_TRAITS[nx] == true
 end
 
 -- evaluate an RXP "<<" condition. Grammar:
 --   space-separated groups are AND'd; "/" inside a group is OR; "!" negates;
 --   a trailing "-- comment" is ignored. e.g. "Human Paladin", "Warrior/Rogue", "!Warlock"
-function RXP12.EvalCondition(cond)
+function Guided.EvalCondition(cond)
   if not cond or cond == "" then return true end
   local c = cond
   local s = string.find(c, "%-%-")              -- strip trailing comment
@@ -129,20 +129,20 @@ function RXP12.EvalCondition(cond)
 end
 
 -- a per-line "<< cond" passes if absent, or its condition matches this character
-local function CondOK(c) return (not c) or RXP12.EvalCondition(c) end
+local function CondOK(c) return (not c) or Guided.EvalCondition(c) end
 
 -- build the list of steps that apply to this character (after << filtering)
 -- weave dungeons: a step ".dungeon X" shows only if X is enabled; ".dungeon !X"
 -- / ".dungeonskip X" (the solo-path alternative) is hidden when X is enabled.
-function RXP12.DungeonCheck(step)
-  local en = RXP12_Save.dungeons or {}
+function Guided.DungeonCheck(step)
+  local en = Guided_Save.dungeons or {}
   if step.dungeonskip and en[step.dungeonskip] then return false end
   if step.dungeon and not en[step.dungeon] then return false end
   return true
 end
 
 -- map of the player's tradeskill ranks (normalized name -> rank) for .skill gates
-function RXP12.BuildSkillMap()
+function Guided.BuildSkillMap()
   local m = {}
   local n = (GetNumSkillLines and GetNumSkillLines()) or 0
   for i = 1, n do
@@ -152,54 +152,54 @@ function RXP12.BuildSkillMap()
   return m
 end
 
-function RXP12.SkillCheck(step)
+function Guided.SkillCheck(step)
   local sk = step.skill
   if not sk then return true end
-  local rank = (RXP12.skillMap and RXP12.skillMap[sk.name]) or 0
+  local rank = (Guided.skillMap and Guided.skillMap[sk.name]) or 0
   if sk.min then return rank >= sk.min end
   if sk.max then return rank < sk.max end
   return true
 end
 
-function RXP12.BuildActive()
-  RXP12.active = {}
-  RXP12.labelIndex = {}      -- step #label -> index in active (for #completewith <label>)
-  RXP12.activeStickies = {}  -- index -> true: sticky steps pinned & not yet done
-  RXP12.dungeonCodes = {}    -- distinct dungeon codes present in this guide (for the picker)
-  RXP12.skillMap = RXP12.BuildSkillMap()
-  local g = RXP12.CurrentGuide()
+function Guided.BuildActive()
+  Guided.active = {}
+  Guided.labelIndex = {}      -- step #label -> index in active (for #completewith <label>)
+  Guided.activeStickies = {}  -- index -> true: sticky steps pinned & not yet done
+  Guided.dungeonCodes = {}    -- distinct dungeon codes present in this guide (for the picker)
+  Guided.skillMap = Guided.BuildSkillMap()
+  local g = Guided.CurrentGuide()
   if not g then return end
-  RXP12.EnsureParsed(g)
+  Guided.EnsureParsed(g)
   local seenD = {}
   for i = 1, table.getn(g.steps) do
     local st = g.steps[i]
-    if st.dungeon and not seenD[st.dungeon] then seenD[st.dungeon] = true; tinsert(RXP12.dungeonCodes, st.dungeon) end
-    if st.dungeonskip and not seenD[st.dungeonskip] then seenD[st.dungeonskip] = true; tinsert(RXP12.dungeonCodes, st.dungeonskip) end
-    if RXP12.EvalCondition(st.cond) and RXP12.DungeonCheck(st)
+    if st.dungeon and not seenD[st.dungeon] then seenD[st.dungeon] = true; tinsert(Guided.dungeonCodes, st.dungeon) end
+    if st.dungeonskip and not seenD[st.dungeonskip] then seenD[st.dungeonskip] = true; tinsert(Guided.dungeonCodes, st.dungeonskip) end
+    if Guided.EvalCondition(st.cond) and Guided.DungeonCheck(st)
         and (not st.maxlevel or UnitLevel("player") <= st.maxlevel)
-        and RXP12.SkillCheck(st) then
-      tinsert(RXP12.active, st)
-      local s = RXP12.active[table.getn(RXP12.active)]
-      if s.label and s.label ~= true then RXP12.labelIndex[s.label] = table.getn(RXP12.active) end
+        and Guided.SkillCheck(st) then
+      tinsert(Guided.active, st)
+      local s = Guided.active[table.getn(Guided.active)]
+      if s.label and s.label ~= true then Guided.labelIndex[s.label] = table.getn(Guided.active) end
     end
   end
-  table.sort(RXP12.dungeonCodes)
-  local n = table.getn(RXP12.active)
-  if (RXP12_Save.step or 1) > n then RXP12_Save.step = (n > 0 and n) or 1 end
+  table.sort(Guided.dungeonCodes)
+  local n = table.getn(Guided.active)
+  if (Guided_Save.step or 1) > n then Guided_Save.step = (n > 0 and n) or 1 end
   -- step numbers skip sticky "side" steps (helpers, not main numbered steps)
-  RXP12.dispNum = {}; RXP12.numMain = 0
+  Guided.dispNum = {}; Guided.numMain = 0
   for i = 1, n do
-    if RXP12.active[i].sticky then RXP12.dispNum[i] = nil
-    else RXP12.numMain = RXP12.numMain + 1; RXP12.dispNum[i] = RXP12.numMain end
+    if Guided.active[i].sticky then Guided.dispNum[i] = nil
+    else Guided.numMain = Guided.numMain + 1; Guided.dispNum[i] = Guided.numMain end
   end
 end
 
 -- resolve a quest id to its name via the bundled quest-name DB (Data\QuestNames.lua).
 -- 1.12 has no quest ids in the API, so this table bridges guide ids <-> log titles.
--- Returns nil for ids not in the DB (e.g. Turtle-custom quests) -> manual fallback.
+-- Returns nil for ids not in the DB (e.g. server-custom quests) -> manual fallback.
 local function QuestName(id)
   if not id then return nil end
-  return RXP12_QuestDB and RXP12_QuestDB[id] or nil
+  return Guided_QuestDB and Guided_QuestDB[id] or nil
 end
 
 -- ----------------------------------------------------------------- parser ----
@@ -207,7 +207,7 @@ end
 -- (step.text / step.gotos / step.quests / step.level), each visible line becomes
 -- an ordered "element" { kind, text, id, obj } so the UI can show a typed icon
 -- per line (accept/turnin/goto/vendor/...) the way RXP does.
-function RXP12.ParseLine(step, t)
+function Guided.ParseLine(step, t)
   -- a trailing "<< cond" applies that condition to THIS line only (per-line filter,
   -- e.g. ">>train Battle Shout << Warrior"). Evaluated per-character at use time,
   -- not at parse time (player identity is set only after guides load). Strip it here.
@@ -369,7 +369,7 @@ local function GuideFaction(g)
   return nil
 end
 
-function RXP12.Parse(text, headerOnly)
+function Guided.Parse(text, headerOnly)
   local guide = { name = "Unnamed", steps = {} }
   local step = nil
   for line in string.gfind(text, "[^\r\n]+") do
@@ -409,7 +409,7 @@ function RXP12.Parse(text, headerOnly)
         elseif key == "next" then guide.nextguide = trim(val)          -- chains to the next guide
         end
       else
-        RXP12.ParseLine(step, t)
+        Guided.ParseLine(step, t)
       end
     end
   end
@@ -419,42 +419,42 @@ end
 
 -- lazily full-parse a guide's steps the first time it's selected, so we can
 -- register hundreds of guides (Era.lua) cheaply at load with only their headers.
-function RXP12.EnsureParsed(g)
+function Guided.EnsureParsed(g)
   if not g or g.parsed then return end
   g.parsed = true
   if not g.raw then g.steps = g.steps or {}; return end
-  local ok, full = pcall(RXP12.Parse, g.raw)
+  local ok, full = pcall(Guided.Parse, g.raw)
   g.steps = (ok and full and full.steps) or {}
 end
 
-function RXP12.RegisterGuide(text)
+function Guided.RegisterGuide(text)
   if type(text) ~= "string" then return end
-  local ok, guide = pcall(RXP12.Parse, text, true)   -- header only; steps parsed on demand
+  local ok, guide = pcall(Guided.Parse, text, true)   -- header only; steps parsed on demand
   if not ok or not guide then return end
   guide.raw = text
-  if not RXP12.guides[guide.name] then tinsert(RXP12.guideOrder, guide.name) end
-  RXP12.guides[guide.name] = guide
+  if not Guided.guides[guide.name] then tinsert(Guided.guideOrder, guide.name) end
+  Guided.guides[guide.name] = guide
 end
 
 -- accept RXP guide data files dropped in unchanged (they call this global),
 -- as long as the real RXPGuides addon hasn't already claimed it
 if type(RXPGuides) ~= "table" then RXPGuides = {} end
 if type(RXPGuides.RegisterGuide) ~= "function" then
-  RXPGuides.RegisterGuide = RXP12.RegisterGuide
+  RXPGuides.RegisterGuide = Guided.RegisterGuide
 end
 
 -- ----------------------------------------------------------------- engine ----
-function RXP12.CurrentGuide()
-  return RXP12_Save and RXP12_Save.guide and RXP12.guides[RXP12_Save.guide] or nil
+function Guided.CurrentGuide()
+  return Guided_Save and Guided_Save.guide and Guided.guides[Guided_Save.guide] or nil
 end
 
-function RXP12.CurrentStep()
-  return RXP12.active and RXP12.active[RXP12_Save.step or 1] or nil
+function Guided.CurrentStep()
+  return Guided.active and Guided.active[Guided_Save.step or 1] or nil
 end
 
-function RXP12.SetStep(i, dir)
-  if not RXP12.active then return end
-  local n = table.getn(RXP12.active)
+function Guided.SetStep(i, dir)
+  if not Guided.active then return end
+  local n = table.getn(Guided.active)
   if n == 0 then return end
   if i < 1 then i = 1 end
   if i > n then i = n end
@@ -463,39 +463,39 @@ function RXP12.SetStep(i, dir)
   -- direction of travel. Sticky steps get pinned (shown as side steps) when
   -- moving forward. Manually-ticked steps aren't recorded, so they stay visitable.
   dir = dir or 1
-  local log = RXP12.BuildQuestLog and RXP12.BuildQuestLog()
+  local log = Guided.BuildQuestLog and Guided.BuildQuestLog()
   local guard = 0
   while guard < 500 do
-    local st = RXP12.active[i]
+    local st = Guided.active[i]
     if st and st.sticky then
-      if dir > 0 and not RXP12.StepDoneByIndex(i, log) then
-        RXP12.activeStickies = RXP12.activeStickies or {}
-        RXP12.activeStickies[i] = true
+      if dir > 0 and not Guided.StepDoneByIndex(i, log) then
+        Guided.activeStickies = Guided.activeStickies or {}
+        Guided.activeStickies[i] = true
       end
       local ni = i + dir
       if ni < 1 or ni > n then break end
       i = ni; guard = guard + 1
-    elseif RXP12.StepDoneByIndex(i, log) then
+    elseif Guided.StepDoneByIndex(i, log) then
       local ni = i + dir
       if ni < 1 or ni > n then break end
       i = ni; guard = guard + 1
     else break end
   end
-  RXP12_Save.step = i
-  RXP12.UpdateUI()
+  Guided_Save.step = i
+  Guided.UpdateUI()
 end
 
-function RXP12.Advance() RXP12.SetStep((RXP12_Save.step or 1) + 1, 1) end
-function RXP12.Back()    RXP12.SetStep((RXP12_Save.step or 1) - 1, -1) end
+function Guided.Advance() Guided.SetStep((Guided_Save.step or 1) + 1, 1) end
+function Guided.Back()    Guided.SetStep((Guided_Save.step or 1) - 1, -1) end
 
--- cycle-target the current step's mobs (one per call). Bind via a macro: /rxp12 target
-function RXP12.TargetStep()
-  local step = RXP12.CurrentStep()
+-- cycle-target the current step's mobs (one per call). Bind via a macro: /guided target
+function Guided.TargetStep()
+  local step = Guided.CurrentStep()
   local t = step and step.targets
   if not t or table.getn(t) == 0 then return end
-  local i = (RXP12.targetIdx or 0) + 1
+  local i = (Guided.targetIdx or 0) + 1
   if i > table.getn(t) then i = 1 end
-  RXP12.targetIdx = i
+  Guided.targetIdx = i
   TargetByName(t[i])
 end
 
@@ -508,7 +508,7 @@ local function ParseGoto(raw)
   if tonumber(f[1]) then
     if table.getn(f) >= 3 then
       local mid = tonumber(f[1])
-      local zname = RXP12_ZoneDB and RXP12_ZoneDB[mid]
+      local zname = Guided_ZoneDB and Guided_ZoneDB[mid]
       if zname then return zname, nil, tonumber(f[2]), tonumber(f[3]) end  -- uiMapID -> zone name
       return nil, mid, tonumber(f[2]), tonumber(f[3])              -- unknown mapid,x,y
     end
@@ -518,9 +518,9 @@ local function ParseGoto(raw)
 end
 
 -- World-map pin integration was removed with the pfQuest dependency. The on-screen
--- direction arrow (RXP12Arrow) handles navigation natively. Kept as a no-op so the
+-- direction arrow (GuidedArrow) handles navigation natively. Kept as a no-op so the
 -- existing call sites don't need to change; a native world-map pin may return later.
-function RXP12.SetWaypoint(step)
+function Guided.SetWaypoint(step)
 end
 
 -- Native player facing for the arrow (no pfQuest / SuperWoW needed). On 1.12 the
@@ -543,7 +543,7 @@ local function FindMinimapArrow()
 end
 local function GetPlayerFacing()
   if not minimapArrow then minimapArrow = FindMinimapArrow() end
-  -- some clients (e.g. Turtle) lack the "rotateMinimap" cvar and GetCVar ERRORS
+  -- some 1.12 clients lack the "rotateMinimap" cvar and GetCVar ERRORS
   -- on an unknown cvar, so probe it safely; default to the non-rotating path.
   local rotating = false
   if GetCVar then
@@ -559,25 +559,25 @@ local function GetPlayerFacing()
 end
 
 -- On-screen direction arrow pointing at the current step's first .goto.
--- Uses RXP12's own bundled arrow sprite-sheet + the native GetPlayerFacing above;
+-- Uses Guided's own bundled arrow sprite-sheet + the native GetPlayerFacing above;
 -- the angle->cell math is copied verbatim from pfQuest/TomTomVanilla (proven).
-local SHEET = "Interface\\AddOns\\RXP12\\img\\arrow"
+local SHEET = "Interface\\AddOns\\Guided\\img\\arrow"
 local arrowThrottle = 0
 
 -- where the arrow points: the current step's goto; if it has none (e.g. a "grind"
 -- step), fall back to an active sticky's goto so it still points at the kill area.
 -- flight destinations wanted by the current step, a few ahead, and active stickies
-function RXP12.WantedFlights()
+function Guided.WantedFlights()
   local want = {}
-  if not RXP12.active then return want end
-  local cur = RXP12_Save.step or 1
+  if not Guided.active then return want end
+  local cur = Guided_Save.step or 1
   for d = 0, 3 do
-    local st = RXP12.active[cur + d]
+    local st = Guided.active[cur + d]
     if st and st.fly then tinsert(want, string.upper(st.fly)) end
   end
-  if RXP12.activeStickies then
-    for idx in pairs(RXP12.activeStickies) do
-      local st = RXP12.active[idx]
+  if Guided.activeStickies then
+    for idx in pairs(Guided.activeStickies) do
+      local st = Guided.active[idx]
       if st and st.fly then tinsert(want, string.upper(st.fly)) end
     end
   end
@@ -585,9 +585,9 @@ function RXP12.WantedFlights()
 end
 
 -- on TAXIMAP_OPENED: fly to the wanted destination (match the node name)
-function RXP12.HandleTaxi()
-  if not RXP12_Save.auto then return end
-  local want = RXP12.WantedFlights()
+function Guided.HandleTaxi()
+  if not Guided_Save.auto then return end
+  local want = Guided.WantedFlights()
   if table.getn(want) == 0 then return end
   local n = (NumTaxiNodes and NumTaxiNodes()) or 0
   for i = 1, n do
@@ -602,24 +602,24 @@ function RXP12.HandleTaxi()
 end
 
 -- on GOSSIP_SHOW at a flight master that uses a gossip menu: pick the taxi option
-function RXP12.HandleTaxiGossip()
-  if not RXP12_Save.auto or not GetGossipOptions then return end
-  if table.getn(RXP12.WantedFlights()) == 0 then return end
+function Guided.HandleTaxiGossip()
+  if not Guided_Save.auto or not GetGossipOptions then return end
+  if table.getn(Guided.WantedFlights()) == 0 then return end
   local opts = { GetGossipOptions() }   -- text1, type1, text2, type2, ...
   for i = 1, table.getn(opts), 2 do
     if opts[i + 1] == "taxi" then SelectGossipOption((i + 1) / 2); return end
   end
 end
 
-function RXP12.ArrowGoto()
-  local step = RXP12.CurrentStep()
+function Guided.ArrowGoto()
+  local step = Guided.CurrentStep()
   if step and step.gotos and step.gotos[1] then return step.gotos[1] end
-  if RXP12.activeStickies and RXP12.active then
+  if Guided.activeStickies and Guided.active then
     local order = {}
-    for idx in pairs(RXP12.activeStickies) do tinsert(order, idx) end
+    for idx in pairs(Guided.activeStickies) do tinsert(order, idx) end
     table.sort(order)
     for o = 1, table.getn(order) do
-      local sk = RXP12.active[order[o]]
+      local sk = Guided.active[order[o]]
       if sk and sk.gotos and sk.gotos[1] then return sk.gotos[1] end
     end
   end
@@ -641,18 +641,18 @@ local ZONE_YARDS = {
   ["Silithus"]=3483,["Felwood"]=5750,["Winterspring"]=7099,["Azshara"]=6357,["Moonglade"]=2308,
 }
 
-function RXP12.ArrowUpdate(elapsed)
-  if not RXP12Arrow then return end
+function Guided.ArrowUpdate(elapsed)
+  if not GuidedArrow then return end
   arrowThrottle = arrowThrottle - (elapsed or 0)
   if arrowThrottle > 0 then return end
   arrowThrottle = 0.05
-  local model = getglobal("RXP12ArrowModel")
-  local txt = getglobal("RXP12ArrowText")
+  local model = getglobal("GuidedArrowModel")
+  local txt = getglobal("GuidedArrowText")
 
-  if RXP12_Save and RXP12_Save.arrow == false then model:Hide(); txt:SetText(""); return end
+  if Guided_Save and Guided_Save.arrow == false then model:Hide(); txt:SetText(""); return end
 
-  local step = RXP12.CurrentStep()
-  local gs = RXP12.ArrowGoto()
+  local step = Guided.CurrentStep()
+  local gs = Guided.ArrowGoto()
   if not gs then model:Hide(); txt:SetText(""); return end
   local zone, mapid, tx, ty = ParseGoto(gs)
   if not tx or not ty then model:Hide(); txt:SetText(""); return end
@@ -685,11 +685,11 @@ function RXP12.ArrowUpdate(elapsed)
 end
 
 local function CreateArrow()
-  if RXP12Arrow then return end
-  local a = CreateFrame("Frame", "RXP12Arrow", UIParent)
+  if GuidedArrow then return end
+  local a = CreateFrame("Frame", "GuidedArrow", UIParent)
   a:SetWidth(48); a:SetHeight(36)
-  if RXP12_Save.arrowpos then
-    a:SetPoint("CENTER", UIParent, "BOTTOMLEFT", RXP12_Save.arrowpos.x, RXP12_Save.arrowpos.y)
+  if Guided_Save.arrowpos then
+    a:SetPoint("CENTER", UIParent, "BOTTOMLEFT", Guided_Save.arrowpos.x, Guided_Save.arrowpos.y)
   else
     a:SetPoint("CENTER", UIParent, "CENTER", 0, -140)
   end
@@ -697,17 +697,17 @@ local function CreateArrow()
   a:SetScript("OnDragStart", function() this:StartMoving() end)
   a:SetScript("OnDragStop", function()
     this:StopMovingOrSizing()
-    RXP12_Save.arrowpos = { x = this:GetLeft() + this:GetWidth()/2, y = this:GetBottom() + this:GetHeight()/2 }
+    Guided_Save.arrowpos = { x = this:GetLeft() + this:GetWidth()/2, y = this:GetBottom() + this:GetHeight()/2 }
   end)
-  local model = a:CreateTexture("RXP12ArrowModel", "ARTWORK")
+  local model = a:CreateTexture("GuidedArrowModel", "ARTWORK")
   model:SetTexture(SHEET)
   model:SetTexCoord(0, 0.109375, 0, 0.08203125)
   model:SetAllPoints()
-  local txt = a:CreateFontString("RXP12ArrowText", "OVERLAY", "GameFontNormalSmall")
+  local txt = a:CreateFontString("GuidedArrowText", "OVERLAY", "GameFontNormalSmall")
   txt:SetPoint("TOP", a, "BOTTOM", 0, -2)
   -- frame stays shown so OnUpdate keeps firing (hidden frames don't update);
   -- the model/text hide themselves when there's nothing to point at.
-  a:SetScript("OnUpdate", function() RXP12.ArrowUpdate(arg1) end)
+  a:SetScript("OnUpdate", function() Guided.ArrowUpdate(arg1) end)
 end
 
 -- snapshot the live quest log keyed by lowercased title:
@@ -723,15 +723,15 @@ BuildQuestLog = function()
     if title and not isHeader then
       local key = lc(title)
       log[key] = { idx = i, complete = (isComplete == 1) }
-      RXP12.seen[key] = true
+      Guided.seen[key] = true
     end
   end
   return log
 end
-RXP12.BuildQuestLog = BuildQuestLog   -- exposed so SetStep (defined earlier) can use it
+Guided.BuildQuestLog = BuildQuestLog   -- exposed so SetStep (defined earlier) can use it
 
 -- is objective `obj` of the quest at log index `li` finished?
--- uses SelectQuestLogEntry + restore (portable: works on Kronos and Turtle)
+-- uses SelectQuestLogEntry + restore (portable: works across 1.12 servers)
 local function ObjectiveDone(li, obj)
   if not (li and obj) then return nil end
   local sel = GetQuestLogSelection()
@@ -744,7 +744,7 @@ end
 -- is a step already satisfied? text-only steps (no quests, no level) are never
 -- "auto-done" -- they need a manual Next so we don't skip instructions.
 -- RXP's .xp gate test (matches functions.xp completion logic)
-function RXP12.XpGateMet(g)
+function Guided.XpGateMet(g)
   if not g then return false end
   local lvl = UnitLevel("player") or 1
   local cur = UnitXP("player") or 0
@@ -758,10 +758,10 @@ function RXP12.XpGateMet(g)
   return raw
 end
 
-function RXP12.IsStepDone(step, log)
+function Guided.IsStepDone(step, log)
   if not step then return false end
   if step.level and UnitLevel("player") >= step.level then return true end
-  if step.xpGate and RXP12.XpGateMet(step.xpGate) then return true end
+  if step.xpGate and Guided.XpGateMet(step.xpGate) then return true end
   if table.getn(step.quests) == 0 then return false end
   if not log then return false end
   local any = false
@@ -781,9 +781,9 @@ function RXP12.IsStepDone(step, log)
           if not ObjectiveDone(entry.idx, q.obj) then return false end -- objective not done
         elseif not entry.complete then return false end       -- whole quest not complete
       elseif q.action == "turnin" then
-        if RXP12.seen[key] and not entry then                       -- seen, now gone = turned in
-          RXP12_Save.doneQuests = RXP12_Save.doneQuests or {}
-          if q.id then RXP12_Save.doneQuests[q.id] = true end       -- remember the hand-in (persisted)
+        if Guided.seen[key] and not entry then                       -- seen, now gone = turned in
+          Guided_Save.doneQuests = Guided_Save.doneQuests or {}
+          if q.id then Guided_Save.doneQuests[q.id] = true end       -- remember the hand-in (persisted)
         else
           return false
         end
@@ -801,12 +801,12 @@ end
 -- persisted completion: once a step is AUTO-detected done, remember it per guide so
 -- it stays skipped after /reload (covers turn-ins the quest log no longer shows).
 -- Only SkipForward records these -- never a manual jump.
-function RXP12.IsDoneStored(s)
+function Guided.IsDoneStored(s)
   -- "done" persists only for quests we've OBSERVED handed in -- never for steps
   -- merely advanced past (accept/kill/gate). A step counts done once every quest
   -- it references has been turned in.
   if not s or not s.quests or table.getn(s.quests) == 0 then return false end
-  local dq = RXP12_Save.doneQuests
+  local dq = Guided_Save.doneQuests
   if not dq then return false end
   local any = false
   for k = 1, table.getn(s.quests) do
@@ -818,27 +818,27 @@ function RXP12.IsDoneStored(s)
   end
   return any
 end
-function RXP12.RecordDone(s)
-  if not s or not s.gindex or not RXP12_Save.guide then return end
-  RXP12_Save.done[RXP12_Save.guide] = RXP12_Save.done[RXP12_Save.guide] or {}
-  RXP12_Save.done[RXP12_Save.guide][s.gindex] = true
+function Guided.RecordDone(s)
+  if not s or not s.gindex or not Guided_Save.guide then return end
+  Guided_Save.done[Guided_Save.guide] = Guided_Save.done[Guided_Save.guide] or {}
+  Guided_Save.done[Guided_Save.guide][s.gindex] = true
 end
 
-function RXP12.StepDoneByIndex(i, log, depth)
+function Guided.StepDoneByIndex(i, log, depth)
   depth = (depth or 0) + 1
   if depth > 30 then return false end
-  local s = RXP12.active and RXP12.active[i]
+  local s = Guided.active and Guided.active[i]
   if not s then return false end
-  if RXP12.IsDoneStored(s) then return true end
+  if Guided.IsDoneStored(s) then return true end
   if s.completewith and s.completewith ~= true then
     local target
     if s.completewith == "next" then target = i + 1
-    else target = RXP12.labelIndex and RXP12.labelIndex[s.completewith] end
+    else target = Guided.labelIndex and Guided.labelIndex[s.completewith] end
     if target and target ~= i then
-      return RXP12.StepDoneByIndex(target, log, depth)
+      return Guided.StepDoneByIndex(target, log, depth)
     end
   end
-  return RXP12.IsStepDone(s, log)
+  return Guided.IsStepDone(s, log)
 end
 
 -- advance past every consecutive already-completed step (handles auto-advance,
@@ -846,53 +846,53 @@ end
 -- on: when reached they're pinned (shown alongside the current step) until their
 -- own condition is met, and we move on to the next non-sticky step. Stops at the
 -- first step that isn't done/sticky, or the last step.
-function RXP12.SkipForward()
-  if not RXP12.active then return end
-  RXP12.activeStickies = RXP12.activeStickies or {}
+function Guided.SkipForward()
+  if not Guided.active then return end
+  Guided.activeStickies = Guided.activeStickies or {}
   local log = BuildQuestLog()   -- also records "seen" titles
-  local n = table.getn(RXP12.active)
+  local n = table.getn(Guided.active)
 
   -- unpin any sticky whose condition has since been satisfied
-  for idx in pairs(RXP12.activeStickies) do
-    if RXP12.StepDoneByIndex(idx, log) then RXP12.activeStickies[idx] = nil end
+  for idx in pairs(Guided.activeStickies) do
+    if Guided.StepDoneByIndex(idx, log) then Guided.activeStickies[idx] = nil end
   end
 
   -- (re)pin sticky side-steps behind the current step that are still relevant.
   -- activeStickies isn't persisted, so after a /reload (current step restored
   -- past a sticky) this rebuilds the pins instead of leaving them greyed.
-  local cur0 = RXP12_Save.step or 1
+  local cur0 = Guided_Save.step or 1
   for i = 1, cur0 - 1 do
-    local sp = RXP12.active[i]
-    if sp and sp.sticky and not RXP12.StepDoneByIndex(i, log) then
-      RXP12.activeStickies[i] = true
+    local sp = Guided.active[i]
+    if sp and sp.sticky and not Guided.StepDoneByIndex(i, log) then
+      Guided.activeStickies[i] = true
     end
   end
 
   local guard = 0
-  while (RXP12_Save.step or 1) < n and guard < 2000 do
+  while (Guided_Save.step or 1) < n and guard < 2000 do
     guard = guard + 1
-    local i = RXP12_Save.step or 1
-    local s = RXP12.active[i]
+    local i = Guided_Save.step or 1
+    local s = Guided.active[i]
     if s and s.sticky then
       -- pin it (unless already satisfied) and step over it
-      if RXP12.StepDoneByIndex(i, log) then RXP12.RecordDone(s) else RXP12.activeStickies[i] = true end
-      RXP12_Save.step = i + 1
-    elseif RXP12.StepDoneByIndex(i, log) then
-      RXP12.RecordDone(s)                 -- auto-completed -> remember across reloads
-      RXP12_Save.step = i + 1
+      if Guided.StepDoneByIndex(i, log) then Guided.RecordDone(s) else Guided.activeStickies[i] = true end
+      Guided_Save.step = i + 1
+    elseif Guided.StepDoneByIndex(i, log) then
+      Guided.RecordDone(s)                 -- auto-completed -> remember across reloads
+      Guided_Save.step = i + 1
     else
       break
     end
   end
-  RXP12.UpdateUI()
+  Guided.UpdateUI()
 end
 
-function RXP12.CheckAuto()
-  RXP12.SkipForward()
+function Guided.CheckAuto()
+  Guided.SkipForward()
 end
 
 -- ------------------------------------------------- auto quest interaction ----
--- Opt-in (RXP12_Save.auto): when you talk to an NPC, auto-accept the quests the
+-- Opt-in (Guided_Save.auto): when you talk to an NPC, auto-accept the quests the
 -- guide wants here and auto-turn-in the ones it expects, incl. picking the reward
 -- when there's no choice. 1.12 has NO secure/taint system, so this is allowed in
 -- combat too. We only act on quests the CURRENT step / pinned stickies / the next
@@ -900,17 +900,17 @@ end
 -- left alone. Quests with a CHOICE of rewards are left for you to pick.
 
 -- titles the guide wants right now: accept set + turnin set (lowercased)
-function RXP12.WantedQuests()
+function Guided.WantedQuests()
   local accept, turnin = {}, {}
-  if not RXP12.active then return accept, turnin end
-  local cur = RXP12_Save.step or 1
+  if not Guided.active then return accept, turnin end
+  local cur = Guided_Save.step or 1
   local idxs = {}
   for d = 0, 5 do idxs[cur + d] = true end          -- current + small lookahead (NPC chains)
-  if RXP12.activeStickies then
-    for k in pairs(RXP12.activeStickies) do idxs[k] = true end
+  if Guided.activeStickies then
+    for k in pairs(Guided.activeStickies) do idxs[k] = true end
   end
   for i in pairs(idxs) do
-    local s = RXP12.active[i]
+    local s = Guided.active[i]
     if s and s.quests then
       for k = 1, table.getn(s.quests) do
         local q = s.quests[k]
@@ -926,7 +926,7 @@ function RXP12.WantedQuests()
 end
 
 -- vanilla 1.12 has NO GetNumGossip*Quests (those came in 2.0) -- calling them
--- ERRORS on a 1.12/Turtle client. GetGossipAvailableQuests/GetGossipActiveQuests
+-- ERRORS on a 1.12 client. GetGossipAvailableQuests/GetGossipActiveQuests
 -- return a flat list where each quest's group begins with its title STRING (level
 -- etc. are numbers/booleans). Collect the strings in order: the k-th title is
 -- gossip quest index k -- so we need neither a count function nor the stride.
@@ -941,15 +941,15 @@ local function GossipQuestList(getter)
 end
 
 -- handle a quest/gossip frame event when auto mode is on. pcall'd by caller.
-function RXP12.HandleQuestEvent(e)
-  if RXP12.debug then
+function Guided.HandleQuestEvent(e)
+  if Guided.debug then
     local na = table.getn(GossipQuestList(GetGossipAvailableQuests))
-    Print("|cff88ccff[dbg]|r "..e.." auto="..tostring(RXP12_Save and RXP12_Save.auto)
+    Print("|cff88ccff[dbg]|r "..e.." auto="..tostring(Guided_Save and Guided_Save.auto)
       .." title='"..tostring((GetTitleText and GetTitleText()) or "").."' gossipAvail="..tostring(na))
   end
-  if not RXP12_Save or not RXP12_Save.auto then return end
-  local accept, turnin = RXP12.WantedQuests()
-  if RXP12.debug then
+  if not Guided_Save or not Guided_Save.auto then return end
+  local accept, turnin = Guided.WantedQuests()
+  if Guided.debug then
     local list = ""
     for k in pairs(accept) do list = list..k.."; " end
     Print("|cff88ccff[dbg]|r want-accept: "..(list ~= "" and list or "(none)"))
@@ -1031,8 +1031,8 @@ end
 -- icon (accept/turnin/goto/vendor/...). The current step is expanded into one
 -- checkbox row per element (tick to mark done; all ticked -> auto-advance) plus
 -- live objective progress and a progress bar; other steps are compact one-liners.
-RXP12.rows = RXP12.rows or {}
-RXP12.rowY = RXP12.rowY or {}
+Guided.rows = Guided.rows or {}
+Guided.rowY = Guided.rowY or {}
 local ROW_WIDTH = 316
 local GUTTER = 26                       -- left column for the step-number badge
 local CONTENT_X = GUTTER + 4
@@ -1273,14 +1273,14 @@ local function GetElemRow(r, j)
   er._onclick = function() er.check:SetChecked(not er.check:GetChecked()); toggle() end
   er.check:SetScript("OnClick", toggle)
   er:SetScript("OnClick", er._onclick)
-  er:SetScript("OnMouseUp", function() if arg1 == "RightButton" then RXP12.OpenMenu(er:GetParent().stepIndex, "cursor") end end)
+  er:SetScript("OnMouseUp", function() if arg1 == "RightButton" then Guided.OpenMenu(er:GetParent().stepIndex, "cursor") end end)
   r.elems[j] = er
   return er
 end
 
 -- use a quest item by id: find it in the bags (its link carries item:<id>:) and
 -- use it. No item-name DB needed; works in combat (1.12 has no secure restrictions).
-function RXP12.FindItem(id)
+function Guided.FindItem(id)
   if not id then return end
   for bag = 0, 4 do
     local slots = GetContainerNumSlots(bag) or 0
@@ -1291,25 +1291,25 @@ function RXP12.FindItem(id)
   end
 end
 
-function RXP12.UseItemById(id)
-  local bag, slot = RXP12.FindItem(id)
+function Guided.UseItemById(id)
+  local bag, slot = Guided.FindItem(id)
   if bag then UseContainerItem(bag, slot); return true end
   Print("That quest item isn't in your bags.")
   return false
 end
 
 -- use the current step's quest items: the next one actually in your bags (cycles
--- if several are present). Bind via a macro: /rxp12 use
-function RXP12.UseStep()
-  local step = RXP12.CurrentStep()
+-- if several are present). Bind via a macro: /guided use
+function Guided.UseStep()
+  local step = Guided.CurrentStep()
   local items = step and step.useitems
   if not items or table.getn(items) == 0 then return end
   local n = table.getn(items)
-  local start = RXP12.useIdx or 0
+  local start = Guided.useIdx or 0
   for k = 1, n do
     local idx = mymod(start + k - 1, n) + 1
-    local bag, slot = RXP12.FindItem(items[idx])
-    if bag then RXP12.useIdx = idx; UseContainerItem(bag, slot); return end
+    local bag, slot = Guided.FindItem(items[idx])
+    if bag then Guided.useIdx = idx; UseContainerItem(bag, slot); return end
   end
   Print("None of this step's quest items are in your bags.")
 end
@@ -1361,15 +1361,15 @@ local function BuildRow(parent, name)
   -- action buttons (shown only on the current step)
   r.targetBtn = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
   r.targetBtn:SetHeight(18); r.targetBtn:Hide()
-  r.targetBtn:SetScript("OnClick", function() RXP12.TargetStep() end)
+  r.targetBtn:SetScript("OnClick", function() Guided.TargetStep() end)
   r.useBtn = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
   r.useBtn:SetHeight(18); r.useBtn:SetWidth(120); r.useBtn:SetText("Use quest item"); r.useBtn:Hide()
-  r.useBtn:SetScript("OnClick", function() RXP12.UseStep() end)
+  r.useBtn:SetScript("OnClick", function() Guided.UseStep() end)
   -- left-click does nothing; RIGHT-click opens the menu (with a "Go to step" option)
   r:SetScript("OnMouseUp", function()
-    if arg1 == "RightButton" then RXP12.OpenMenu(this.stepIndex, "cursor") end
+    if arg1 == "RightButton" then Guided.OpenMenu(this.stepIndex, "cursor") end
   end)
-  if parent == RXP12ScrollChild then            -- hover highlight on list rows only
+  if parent == GuidedScrollChild then            -- hover highlight on list rows only
     r:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
     local hl = r:GetHighlightTexture(); if hl then hl:SetVertexColor(1, 1, 1, 0.08) end
   end
@@ -1377,29 +1377,29 @@ local function BuildRow(parent, name)
 end
 
 local function GetRow(i)
-  if RXP12.rows[i] then return RXP12.rows[i] end
-  local r = BuildRow(RXP12ScrollChild, "RXP12Row"..i)
-  RXP12.rows[i] = r
+  if Guided.rows[i] then return Guided.rows[i] end
+  local r = BuildRow(GuidedScrollChild, "GuidedRow"..i)
+  Guided.rows[i] = r
   return r
 end
 
 local function GetStepRow(k)
-  RXP12.stepRows = RXP12.stepRows or {}
-  if RXP12.stepRows[k] then return RXP12.stepRows[k] end
-  local r = BuildRow(RXP12StepFrame, "RXP12StepRow"..k)
-  RXP12.stepRows[k] = r
+  Guided.stepRows = Guided.stepRows or {}
+  if Guided.stepRows[k] then return Guided.stepRows[k] end
+  local r = BuildRow(GuidedStepFrame, "GuidedStepRow"..k)
+  Guided.stepRows[k] = r
   return r
 end
 
 -- lay out one step's row; returns its height. mode: current renders the expanded
 -- checkbox card, others render the compact line.
 local function RenderRow(r, step, i, cur, expand)
-  local active = RXP12.activeStickies and RXP12.activeStickies[i]
+  local active = Guided.activeStickies and Guided.activeStickies[i]
   local isCur = (i == cur)
   r.stepIndex = i
 
   -- badge + status styling
-  local dn = RXP12.dispNum and RXP12.dispNum[i]
+  local dn = Guided.dispNum and Guided.dispNum[i]
   if dn then r.num:SetText(tostring(dn)) end
   if isCur then
     -- highlight the current step in the list, but not in the dedicated top frame
@@ -1491,7 +1491,7 @@ local function RenderRow(r, step, i, cur, expand)
           if not el.checked then return end
         end
       end
-      if n > 0 then RXP12.Advance() end
+      if n > 0 then Guided.Advance() end
     end
     -- Target / Use action buttons (side by side, one row)
     local hasT = step.targets and table.getn(step.targets) > 0
@@ -1556,158 +1556,158 @@ local function RenderRow(r, step, i, cur, expand)
   return h
 end
 
-function RXP12.ScrollToStep(cur)
-  if not RXP12ScrollFrame then return end
-  local maxScroll = RXP12ScrollChild:GetHeight() - RXP12ScrollFrame:GetHeight()
+function Guided.ScrollToStep(cur)
+  if not GuidedScrollFrame then return end
+  local maxScroll = GuidedScrollChild:GetHeight() - GuidedScrollFrame:GetHeight()
   if maxScroll < 0 then maxScroll = 0 end
-  local target = (RXP12.rowY[cur] or 0) - 24
+  local target = (Guided.rowY[cur] or 0) - 24
   if target < 0 then target = 0 end
   if target > maxScroll then target = maxScroll end
-  RXP12ScrollFrame:SetVerticalScroll(target)
+  GuidedScrollFrame:SetVerticalScroll(target)
 end
 
-function RXP12.WheelScroll(dir)
-  if not RXP12ScrollFrame then return end
-  local maxScroll = RXP12ScrollChild:GetHeight() - RXP12ScrollFrame:GetHeight()
+function Guided.WheelScroll(dir)
+  if not GuidedScrollFrame then return end
+  local maxScroll = GuidedScrollChild:GetHeight() - GuidedScrollFrame:GetHeight()
   if maxScroll < 0 then maxScroll = 0 end
-  local v = RXP12ScrollFrame:GetVerticalScroll() - (dir or 0) * 36
+  local v = GuidedScrollFrame:GetVerticalScroll() - (dir or 0) * 36
   if v < 0 then v = 0 end
   if v > maxScroll then v = maxScroll end
-  RXP12ScrollFrame:SetVerticalScroll(v)
+  GuidedScrollFrame:SetVerticalScroll(v)
 end
 
-function RXP12.UpdateUI()
-  if not RXP12Frame then return end
-  local g = RXP12.CurrentGuide()
-  if not g or not RXP12.active then
-    getglobal("RXP12FrameTitle"):SetText("RXP12 -- no guide")
-    getglobal("RXP12FrameCounter"):SetText("")
-    if RXP12FrameClassIcon then RXP12FrameClassIcon:Hide() end
+function Guided.UpdateUI()
+  if not GuidedFrame then return end
+  local g = Guided.CurrentGuide()
+  if not g or not Guided.active then
+    getglobal("GuidedFrameTitle"):SetText("Guided -- no guide")
+    getglobal("GuidedFrameCounter"):SetText("")
+    if GuidedFrameClassIcon then GuidedFrameClassIcon:Hide() end
     local r = GetRow(1); r.stepIndex = nil; r.bg:Hide(); r.accent:Hide(); r.num:Hide(); r.check:Hide(); r.bar:Hide(); r.kindIcon:Hide(); r.targetBtn:Hide(); r.useBtn:Hide()
     if r.elems then local k=1; while r.elems[k] do r.elems[k]:Hide(); k=k+1 end end
     r.fs:ClearAllPoints(); r.fs:SetPoint("TOPLEFT", r, "TOPLEFT", 8, -4); r.fs:SetWidth(ROW_WIDTH - 16)
     r.fs:Show(); r.fs:SetAlpha(1)
-    r.fs:SetText("No guide loaded.\nType |cffffd200/rxp12 list|r, then |cffffd200/rxp12 load <name>|r")
+    r.fs:SetText("No guide loaded.\nType |cffffd200/guided list|r, then |cffffd200/guided load <name>|r")
     r:SetHeight(FSHeight(r.fs) + 8); r:SetWidth(ROW_WIDTH)
-    r:ClearAllPoints(); r:SetPoint("TOPLEFT", RXP12ScrollChild, "TOPLEFT", 0, 0); r:Show()
-    local idx = 2; while RXP12.rows[idx] do RXP12.rows[idx]:Hide(); idx = idx + 1 end
-    RXP12ScrollChild:SetHeight(1)
-    if RXP12StepFrame then RXP12StepFrame:Hide() end
-    RXP12.SetWaypoint(nil)
+    r:ClearAllPoints(); r:SetPoint("TOPLEFT", GuidedScrollChild, "TOPLEFT", 0, 0); r:Show()
+    local idx = 2; while Guided.rows[idx] do Guided.rows[idx]:Hide(); idx = idx + 1 end
+    GuidedScrollChild:SetHeight(1)
+    if GuidedStepFrame then GuidedStepFrame:Hide() end
+    Guided.SetWaypoint(nil)
     return
   end
-  getglobal("RXP12FrameTitle"):SetText(g.name)
-  local n = table.getn(RXP12.active)
-  local cur = RXP12_Save.step or 1
-  getglobal("RXP12FrameCounter"):SetText((RXP12.dispNum and RXP12.dispNum[cur] or cur).." / "..(RXP12.numMain or n))
+  getglobal("GuidedFrameTitle"):SetText(g.name)
+  local n = table.getn(Guided.active)
+  local cur = Guided_Save.step or 1
+  getglobal("GuidedFrameCounter"):SetText((Guided.dispNum and Guided.dispNum[cur] or cur).." / "..(Guided.numMain or n))
 
   -- header class icon
-  if RXP12FrameClassIcon then
+  if GuidedFrameClassIcon then
     local tc = CLASS_TC[PLAYER_CLASS or ""]
     if tc then
-      RXP12FrameClassIcon:SetTexCoord(tc[1], tc[2], tc[3], tc[4]); RXP12FrameClassIcon:Show()
-    else RXP12FrameClassIcon:Hide() end
+      GuidedFrameClassIcon:SetTexCoord(tc[1], tc[2], tc[3], tc[4]); GuidedFrameClassIcon:Show()
+    else GuidedFrameClassIcon:Hide() end
   end
 
   -- follow the (resizable) frame width so rows fill the scroll area
-  RXP12.rowY = {}
+  Guided.rowY = {}
   local y = 0
   for i = 1, n do
-    local st = RXP12.active[i]
+    local st = Guided.active[i]
     local r = GetRow(i)
-    if st.xpGate and st.xpGate.skip and RXP12.XpGateMet(st.xpGate) then
-      r:Hide(); RXP12.rowY[i] = y          -- skipstep gate not applicable: hide (like a class filter)
+    if st.xpGate and st.xpGate.skip and Guided.XpGateMet(st.xpGate) then
+      r:Hide(); Guided.rowY[i] = y          -- skipstep gate not applicable: hide (like a class filter)
     else
       local h = RenderRow(r, st, i, cur, false)
       r:ClearAllPoints()
-      r:SetPoint("TOPLEFT", RXP12ScrollChild, "TOPLEFT", 0, -y)
+      r:SetPoint("TOPLEFT", GuidedScrollChild, "TOPLEFT", 0, -y)
       r:Show()
-      RXP12.rowY[i] = y
+      Guided.rowY[i] = y
       y = y + h
     end
   end
   local idx = n + 1
-  while RXP12.rows[idx] do RXP12.rows[idx]:Hide(); idx = idx + 1 end
+  while Guided.rows[idx] do Guided.rows[idx]:Hide(); idx = idx + 1 end
 
   -- active steps (pinned stickies + current), stacked in the linked top frame
-  if RXP12StepFrame then
+  if GuidedStepFrame then
     local order = {}
-    if RXP12.activeStickies then
+    if Guided.activeStickies then
       local sk = {}
-      for idx in pairs(RXP12.activeStickies) do if idx ~= cur then tinsert(sk, idx) end end
+      for idx in pairs(Guided.activeStickies) do if idx ~= cur then tinsert(sk, idx) end end
       table.sort(sk)
       for j = 1, table.getn(sk) do tinsert(order, sk[j]) end    -- sticky side-steps first (above)
     end
-    if RXP12.active[cur] then tinsert(order, cur) end           -- main (current) step last (below)
+    if Guided.active[cur] then tinsert(order, cur) end           -- main (current) step last (below)
     local sy, k = 6, 0
     for oi = 1, table.getn(order) do
-      local st = RXP12.active[order[oi]]
+      local st = Guided.active[order[oi]]
       if st then
         k = k + 1
         local sr = GetStepRow(k)
         local sh = RenderRow(sr, st, order[oi], cur, true)
-        sr:ClearAllPoints(); sr:SetPoint("TOPLEFT", RXP12StepFrame, "TOPLEFT", 6, -sy)
+        sr:ClearAllPoints(); sr:SetPoint("TOPLEFT", GuidedStepFrame, "TOPLEFT", 6, -sy)
         sr:Show()
         sy = sy + sh + 3
       end
     end
-    if RXP12.stepRows then local j = k + 1; while RXP12.stepRows[j] do RXP12.stepRows[j]:Hide(); j = j + 1 end end
+    if Guided.stepRows then local j = k + 1; while Guided.stepRows[j] do Guided.stepRows[j]:Hide(); j = j + 1 end end
     if k > 0 then
-      RXP12StepFrame:SetHeight(sy + 4)
-      RXP12StepFrame:SetBackdropColor(0.05, 0.05, 0.07, RXP12_Save.opacity or 0.92)
-      RXP12StepFrame:Show()
+      GuidedStepFrame:SetHeight(sy + 4)
+      GuidedStepFrame:SetBackdropColor(0.05, 0.05, 0.07, Guided_Save.opacity or 0.92)
+      GuidedStepFrame:Show()
     else
-      RXP12StepFrame:Hide()
+      GuidedStepFrame:Hide()
     end
   end
 
-  RXP12ScrollChild:SetWidth(ROW_WIDTH)
-  RXP12ScrollChild:SetHeight(y > 0 and y or 1)
-  RXP12.ScrollToStep(cur)
-  RXP12.SetWaypoint(RXP12.active[cur])
+  GuidedScrollChild:SetWidth(ROW_WIDTH)
+  GuidedScrollChild:SetHeight(y > 0 and y or 1)
+  Guided.ScrollToStep(cur)
+  Guided.SetWaypoint(Guided.active[cur])
 end
 
 -- ------------------------------------------------------ guide-select menu ----
 -- RXP-style cog menu: a native UIDropDownMenu whose top level has Options +
 -- Auto-detect, then one expandable submenu per guide #group (subcategory); the
 -- submenu lists that group's guides (current one checked). Click a guide to load.
-function RXP12.LoadGuideByName(name)
-  if not RXP12.guides[name] then return end
-  RXP12_Save.guide = name; RXP12_Save.step = 1
-  RXP12.seen = {}; RXP12.activeStickies = {}
-  RXP12.BuildActive(); RXP12.SkipForward(); RXP12.Show()
+function Guided.LoadGuideByName(name)
+  if not Guided.guides[name] then return end
+  Guided_Save.guide = name; Guided_Save.step = 1
+  Guided.seen = {}; Guided.activeStickies = {}
+  Guided.BuildActive(); Guided.SkipForward(); Guided.Show()
   Print("Loaded: |cffffd200"..name.."|r")
 end
 
 local function byLevel(a, b)
-  local la = RXP12.guides[a].lo or 999
-  local lb = RXP12.guides[b].lo or 999
+  local la = Guided.guides[a].lo or 999
+  local lb = Guided.guides[b].lo or 999
   if la ~= lb then return la < lb end
   return a < b
 end
 
 -- resolve a guide's subcategory for THIS character: a plain #subgroup, else the
 -- first conditional #subgroup whose "<<" condition matches (e.g. per-class sets).
-function RXP12.GuideSubgroup(g)
+function Guided.GuideSubgroup(g)
   if g.subgroup then return g.subgroup end
   if g.subgroupCond then
     for i = 1, table.getn(g.subgroupCond) do
-      if RXP12.EvalCondition(g.subgroupCond[i].cond) then return g.subgroupCond[i].name end
+      if Guided.EvalCondition(g.subgroupCond[i].cond) then return g.subgroupCond[i].name end
     end
   end
   return nil
 end
 
 -- a guide is visible if it has no faction or matches the player's
-function RXP12.GuideVisible(g)
-  return g and (not g.faction or g.faction == RXP12.me.faction)
+function Guided.GuideVisible(g)
+  return g and (not g.faction or g.faction == Guided.me.faction)
 end
 
-function RXP12.MenuGroups()
+function Guided.MenuGroups()
   local seen, order = {}, {}
-  for i = 1, table.getn(RXP12.guideOrder) do
-    local g = RXP12.guides[RXP12.guideOrder[i]]
-    if RXP12.GuideVisible(g) then
+  for i = 1, table.getn(Guided.guideOrder) do
+    local g = Guided.guides[Guided.guideOrder[i]]
+    if Guided.GuideVisible(g) then
       local grp = g.group or "Other"
       if not seen[grp] then seen[grp] = true; tinsert(order, grp) end
     end
@@ -1716,11 +1716,11 @@ function RXP12.MenuGroups()
 end
 
 -- unique subgroups (subcategories) within a group, in registration order
-function RXP12.SubgroupsInGroup(grp)
+function Guided.SubgroupsInGroup(grp)
   local seen, order = {}, {}
-  for i = 1, table.getn(RXP12.guideOrder) do
-    local g = RXP12.guides[RXP12.guideOrder[i]]
-    local sub = RXP12.GuideVisible(g) and RXP12.GuideSubgroup(g)
+  for i = 1, table.getn(Guided.guideOrder) do
+    local g = Guided.guides[Guided.guideOrder[i]]
+    local sub = Guided.GuideVisible(g) and Guided.GuideSubgroup(g)
     if ((g.group) or "Other") == grp and sub and not seen[sub] then
       seen[sub] = true; tinsert(order, sub)
     end
@@ -1730,13 +1730,13 @@ end
 
 -- guides in a group, sorted by start level. sub: nil = all; a string = that
 -- subgroup only; false = only guides with no subgroup.
-function RXP12.GuidesInGroup(grp, sub)
+function Guided.GuidesInGroup(grp, sub)
   local out = {}
-  for i = 1, table.getn(RXP12.guideOrder) do
-    local gname = RXP12.guideOrder[i]
-    local g = RXP12.guides[gname]
-    if RXP12.GuideVisible(g) and ((g.group) or "Other") == grp then
-      local gsub = RXP12.GuideSubgroup(g)
+  for i = 1, table.getn(Guided.guideOrder) do
+    local gname = Guided.guideOrder[i]
+    local g = Guided.guides[gname]
+    if Guided.GuideVisible(g) and ((g.group) or "Other") == grp then
+      local gsub = Guided.GuideSubgroup(g)
       if sub == nil or (sub == false and not gsub) or (sub and gsub == sub) then
         tinsert(out, gname)
       end
@@ -1746,39 +1746,39 @@ function RXP12.GuidesInGroup(grp, sub)
   return out
 end
 
-function RXP12.MenuInit()
+function Guided.MenuInit()
   local level = UIDROPDOWNMENU_MENU_LEVEL or 1
   local info
   if level == 1 then
-    if RXP12.menuStep then
-      local target = RXP12.menuStep
+    if Guided.menuStep then
+      local target = Guided.menuStep
       info = {}; info.text = "Go to step "..target; info.notCheckable = 1
-      info.func = function() RXP12.SetStep(target, target < (RXP12_Save.step or 1) and -1 or 1); CloseDropDownMenus() end
+      info.func = function() Guided.SetStep(target, target < (Guided_Save.step or 1) and -1 or 1); CloseDropDownMenus() end
       UIDropDownMenu_AddButton(info, 1)
     end
-    info = {}; info.text = "RXP12"; info.isTitle = 1; info.notCheckable = 1
+    info = {}; info.text = "Guided"; info.isTitle = 1; info.notCheckable = 1
     UIDropDownMenu_AddButton(info, 1)
 
     info = {}; info.text = "Options..."; info.notCheckable = 1
-    info.func = function() RXP12.ToggleOptions(); CloseDropDownMenus() end
+    info.func = function() Guided.ToggleOptions(); CloseDropDownMenus() end
     UIDropDownMenu_AddButton(info, 1)
 
     info = {}; info.text = "Import guide..."; info.notCheckable = 1
-    info.func = function() RXP12.ShowImport(); CloseDropDownMenus() end
+    info.func = function() Guided.ShowImport(); CloseDropDownMenus() end
     UIDropDownMenu_AddButton(info, 1)
 
     info = {}; info.text = "Dungeons..."; info.notCheckable = 1
-    info.func = function() RXP12.ShowDungeons(); CloseDropDownMenus() end
+    info.func = function() Guided.ShowDungeons(); CloseDropDownMenus() end
     UIDropDownMenu_AddButton(info, 1)
 
-    info = {}; info.text = "Leveling tracker"; info.checked = (RXP12_Save.tracker == true)
-    info.func = function() RXP12.ToggleTracker(); CloseDropDownMenus() end
+    info = {}; info.text = "Leveling tracker"; info.checked = (Guided_Save.tracker == true)
+    info.func = function() Guided.ToggleTracker(); CloseDropDownMenus() end
     UIDropDownMenu_AddButton(info, 1)
 
     info = {}; info.text = "Auto-detect my guide"; info.notCheckable = 1
     info.func = function()
-      local best = RXP12.AutoSelectGuide()
-      if best then RXP12.LoadGuideByName(best) end
+      local best = Guided.AutoSelectGuide()
+      if best then Guided.LoadGuideByName(best) end
       CloseDropDownMenus()
     end
     UIDropDownMenu_AddButton(info, 1)
@@ -1786,7 +1786,7 @@ function RXP12.MenuInit()
     info = {}; info.text = "Guides"; info.isTitle = 1; info.notCheckable = 1
     UIDropDownMenu_AddButton(info, 1)
 
-    local groups = RXP12.MenuGroups()
+    local groups = Guided.MenuGroups()
     for gi = 1, table.getn(groups) do
       info = {}; info.text = groups[gi]; info.notCheckable = 1
       info.hasArrow = 1; info.value = groups[gi]
@@ -1794,7 +1794,7 @@ function RXP12.MenuInit()
     end
   elseif level == 2 then
     local grp = UIDROPDOWNMENU_MENU_VALUE
-    local subs = RXP12.SubgroupsInGroup(grp)
+    local subs = Guided.SubgroupsInGroup(grp)
     if table.getn(subs) > 0 then
       -- subcategory tier: one arrow per subgroup, then any guides with no subgroup
       for si = 1, table.getn(subs) do
@@ -1802,29 +1802,29 @@ function RXP12.MenuInit()
         info.hasArrow = 1; info.value = grp.."\1"..subs[si]
         UIDropDownMenu_AddButton(info, 2)
       end
-      local loose = RXP12.GuidesInGroup(grp, false)
+      local loose = Guided.GuidesInGroup(grp, false)
       for ni = 1, table.getn(loose) do
         local gname = loose[ni]
-        info = {}; info.text = gname; info.checked = (RXP12_Save.guide == gname)
-        info.func = function() RXP12.LoadGuideByName(gname); CloseDropDownMenus() end
+        info = {}; info.text = gname; info.checked = (Guided_Save.guide == gname)
+        info.func = function() Guided.LoadGuideByName(gname); CloseDropDownMenus() end
         UIDropDownMenu_AddButton(info, 2)
       end
     else
-      local names = RXP12.GuidesInGroup(grp)
+      local names = Guided.GuidesInGroup(grp)
       for ni = 1, table.getn(names) do
         local gname = names[ni]
-        info = {}; info.text = gname; info.checked = (RXP12_Save.guide == gname)
-        info.func = function() RXP12.LoadGuideByName(gname); CloseDropDownMenus() end
+        info = {}; info.text = gname; info.checked = (Guided_Save.guide == gname)
+        info.func = function() Guided.LoadGuideByName(gname); CloseDropDownMenus() end
         UIDropDownMenu_AddButton(info, 2)
       end
     end
   elseif level == 3 then
     local _, _, grp, sub = string.find(UIDROPDOWNMENU_MENU_VALUE or "", "^(.-)\1(.*)$")
-    local names = RXP12.GuidesInGroup(grp, sub)
+    local names = Guided.GuidesInGroup(grp, sub)
     for ni = 1, table.getn(names) do
       local gname = names[ni]
-      info = {}; info.text = gname; info.checked = (RXP12_Save.guide == gname)
-      info.func = function() RXP12.LoadGuideByName(gname); CloseDropDownMenus() end
+      info = {}; info.text = gname; info.checked = (Guided_Save.guide == gname)
+      info.func = function() Guided.LoadGuideByName(gname); CloseDropDownMenus() end
       UIDropDownMenu_AddButton(info, 3)
     end
   end
@@ -1832,30 +1832,30 @@ end
 
 -- open the cog dropdown. A stepIndex (from a right-clicked row) adds a
 -- "Go to step N" entry at the top, alongside the Options/Guides menu.
-function RXP12.OpenMenu(stepIndex, anchor)
-  if not RXP12Menu then return end
-  RXP12.menuStep = stepIndex
+function Guided.OpenMenu(stepIndex, anchor)
+  if not GuidedMenu then return end
+  Guided.menuStep = stepIndex
   -- Always anchor to the cog (a stable left-side point), NOT the cursor: vanilla
   -- opens submenus to the RIGHT of the parent, and a cursor anchor near a screen
   -- edge flips them back over the parent (menus "clip into each other"). Close any
   -- stale menu first so re-opening never stacks frames.
   CloseDropDownMenus()
-  ToggleDropDownMenu(1, nil, RXP12Menu, "RXP12FrameCog", 0, 0)
+  ToggleDropDownMenu(1, nil, GuidedMenu, "GuidedFrameCog", 0, 0)
 end
 
-function RXP12.ToggleMenu()
-  RXP12.OpenMenu(nil, "RXP12FrameCog")
+function Guided.ToggleMenu()
+  Guided.OpenMenu(nil, "GuidedFrameCog")
 end
 
 local function CreateUI()
-  if RXP12Frame then return end
-  local f = CreateFrame("Frame", "RXP12Frame", UIParent)
-  f:SetWidth(340); f:SetHeight(RXP12_Save.h or 230)   -- width fixed; height resizable
+  if GuidedFrame then return end
+  local f = CreateFrame("Frame", "GuidedFrame", UIParent)
+  f:SetWidth(340); f:SetHeight(Guided_Save.h or 230)   -- width fixed; height resizable
   f:SetResizable(true)
   if f.SetMinResize then f:SetMinResize(340, 170) end
   if f.SetMaxResize then f:SetMaxResize(340, 900) end
-  if RXP12_Save.pos then
-    f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", RXP12_Save.pos.x, RXP12_Save.pos.y)
+  if Guided_Save.pos then
+    f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", Guided_Save.pos.x, Guided_Save.pos.y)
   else
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
   end
@@ -1864,42 +1864,42 @@ local function CreateUI()
     edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
     tile = true, tileSize = 16, edgeSize = 16,
     insets = { left = 4, right = 4, top = 4, bottom = 4 } })
-  f:SetBackdropColor(0.05, 0.05, 0.07, RXP12_Save.opacity or 0.92)
+  f:SetBackdropColor(0.05, 0.05, 0.07, Guided_Save.opacity or 0.92)
   f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
-  f:SetScript("OnDragStart", function() if not RXP12_Save.locked then this:StartMoving() end end)
+  f:SetScript("OnDragStart", function() if not Guided_Save.locked then this:StartMoving() end end)
   f:SetScript("OnDragStop", function()
     this:StopMovingOrSizing()
-    RXP12_Save.pos = { x = this:GetLeft(), y = this:GetTop() }
+    Guided_Save.pos = { x = this:GetLeft(), y = this:GetTop() }
   end)
-  f:SetScript("OnMouseUp", function() if arg1 == "RightButton" then RXP12.OpenMenu(nil, "cursor") end end)
+  f:SetScript("OnMouseUp", function() if arg1 == "RightButton" then Guided.OpenMenu(nil, "cursor") end end)
 
   -- header: cog menu + class icon + guide name + counter, with a divider line
-  local cog = CreateFrame("Button", "RXP12FrameCog", f)
+  local cog = CreateFrame("Button", "GuidedFrameCog", f)
   cog:SetWidth(18); cog:SetHeight(18)
   cog:SetPoint("TOPLEFT", f, "TOPLEFT", 8, -7)
   cog:SetNormalTexture("Interface\\Icons\\INV_Misc_Gear_01")
   cog:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-  cog:SetScript("OnClick", function() RXP12.ToggleMenu() end)
+  cog:SetScript("OnClick", function() Guided.ToggleMenu() end)
   cog:SetScript("OnEnter", function()
     GameTooltip:SetOwner(this, "ANCHOR_RIGHT"); GameTooltip:SetText("Guides & Options", 1, 1, 1); GameTooltip:Show()
   end)
   cog:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-  local cicon = f:CreateTexture("RXP12FrameClassIcon", "OVERLAY")
+  local cicon = f:CreateTexture("GuidedFrameClassIcon", "OVERLAY")
   cicon:SetWidth(18); cicon:SetHeight(18)
   cicon:SetPoint("LEFT", cog, "RIGHT", 5, 0)
   cicon:SetTexture("Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes")
   cicon:Hide()
 
   -- hidden dropdown that backs the cog menu
-  local menu = CreateFrame("Frame", "RXP12Menu", UIParent, "UIDropDownMenuTemplate")
-  UIDropDownMenu_Initialize(menu, RXP12.MenuInit, "MENU")
+  local menu = CreateFrame("Frame", "GuidedMenu", UIParent, "UIDropDownMenuTemplate")
+  UIDropDownMenu_Initialize(menu, Guided.MenuInit, "MENU")
 
-  local title = f:CreateFontString("RXP12FrameTitle", "OVERLAY", "GameFontNormal")
+  local title = f:CreateFontString("GuidedFrameTitle", "OVERLAY", "GameFontNormal")
   title:SetPoint("LEFT", cicon, "RIGHT", 6, 0)
-  title:SetText("RXP12")
+  title:SetText("Guided")
 
-  local counter = f:CreateFontString("RXP12FrameCounter", "OVERLAY", "GameFontHighlightSmall")
+  local counter = f:CreateFontString("GuidedFrameCounter", "OVERLAY", "GameFontHighlightSmall")
   counter:SetPoint("TOPRIGHT", f, "TOPRIGHT", -28, -12)
 
   local divider = f:CreateTexture(nil, "ARTWORK")
@@ -1908,17 +1908,17 @@ local function CreateUI()
   divider:SetHeight(1); divider:SetTexture(1, 1, 1, 0.15)
 
   -- scrolling step list
-  local sf = CreateFrame("ScrollFrame", "RXP12ScrollFrame", f)
+  local sf = CreateFrame("ScrollFrame", "GuidedScrollFrame", f)
   sf:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -34)
   sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 16)
-  local cchild = CreateFrame("Frame", "RXP12ScrollChild", sf)
+  local cchild = CreateFrame("Frame", "GuidedScrollChild", sf)
   cchild:SetWidth(ROW_WIDTH); cchild:SetHeight(1)
   sf:SetScrollChild(cchild)
   sf:EnableMouseWheel(true)
-  sf:SetScript("OnMouseWheel", function() RXP12.WheelScroll(arg1) end)
+  sf:SetScript("OnMouseWheel", function() Guided.WheelScroll(arg1) end)
 
   -- linked top frame: the current step in full detail (sits above the list)
-  local sfr = CreateFrame("Frame", "RXP12StepFrame", f)
+  local sfr = CreateFrame("Frame", "GuidedStepFrame", f)
   sfr:SetPoint("BOTTOMLEFT", f, "TOPLEFT", 0, 6)
   sfr:SetPoint("BOTTOMRIGHT", f, "TOPRIGHT", 0, 6)
   sfr:SetHeight(60)
@@ -1927,15 +1927,15 @@ local function CreateUI()
     edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
     tile = true, tileSize = 16, edgeSize = 16,
     insets = { left = 4, right = 4, top = 4, bottom = 4 } })
-  sfr:SetBackdropColor(0.05, 0.05, 0.07, RXP12_Save.opacity or 0.92)
+  sfr:SetBackdropColor(0.05, 0.05, 0.07, Guided_Save.opacity or 0.92)
   sfr:Hide()
 
-  local close = CreateFrame("Button", "RXP12FrameClose", f, "UIPanelCloseButton")
+  local close = CreateFrame("Button", "GuidedFrameClose", f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
-  close:SetScript("OnClick", function() RXP12.Hide() end)
+  close:SetScript("OnClick", function() Guided.Hide() end)
 
   -- vertical resize handle: drag the bottom edge up/down (width stays fixed)
-  local grip = CreateFrame("Button", "RXP12FrameGrip", f)
+  local grip = CreateFrame("Button", "GuidedFrameGrip", f)
   grip:SetWidth(48); grip:SetHeight(9)
   grip:SetPoint("BOTTOM", f, "BOTTOM", 0, 4)
   grip.tex = grip:CreateTexture(nil, "OVERLAY")
@@ -1943,11 +1943,11 @@ local function CreateUI()
   grip.tex:SetVertexColor(1, 1, 1, 0.22)
   grip:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
   local ghl = grip:GetHighlightTexture(); if ghl then ghl:SetVertexColor(1, 1, 1, 0.18) end
-  grip:SetScript("OnMouseDown", function() if not RXP12_Save.locked then f:StartSizing("BOTTOM") end end)
+  grip:SetScript("OnMouseDown", function() if not Guided_Save.locked then f:StartSizing("BOTTOM") end end)
   grip:SetScript("OnMouseUp", function()
     f:StopMovingOrSizing()
-    RXP12_Save.h = f:GetHeight()
-    RXP12.UpdateUI()
+    Guided_Save.h = f:GetHeight()
+    Guided.UpdateUI()
   end)
   grip:SetScript("OnEnter", function()
     GameTooltip:SetOwner(this, "ANCHOR_TOP"); GameTooltip:SetText("Drag to resize height", 1, 1, 1); GameTooltip:Show()
@@ -1955,22 +1955,22 @@ local function CreateUI()
   grip:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 
-  RXP12.UpdateUI()
+  Guided.UpdateUI()
 end
 
 -- ------------------------------------------------------------- options UI ----
 -- ----------------------------------------------------------- minimap button ----
 local function MinimapButtonPos()
-  local b = RXP12MinimapButton
+  local b = GuidedMinimapButton
   if not b then return end
-  local a = math.rad(RXP12_Save.mmangle or 210)
+  local a = math.rad(Guided_Save.mmangle or 210)
   b:ClearAllPoints()
   b:SetPoint("CENTER", Minimap, "CENTER", 80 * math.cos(a), 80 * math.sin(a))
 end
 
 local function CreateMinimapButton()
-  if RXP12MinimapButton then return end
-  local b = CreateFrame("Button", "RXP12MinimapButton", Minimap)
+  if GuidedMinimapButton then return end
+  local b = CreateFrame("Button", "GuidedMinimapButton", Minimap)
   b:SetWidth(31); b:SetHeight(31); b:SetFrameStrata("MEDIUM"); b:SetFrameLevel(8)
   b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
   b:RegisterForDrag("LeftButton")
@@ -1983,10 +1983,10 @@ local function CreateMinimapButton()
   b:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
   b:SetScript("OnClick", function()
     if arg1 == "RightButton" then
-      RXP12.menuStep = nil; CloseDropDownMenus()
-      if RXP12Menu then ToggleDropDownMenu(1, nil, RXP12Menu, "RXP12MinimapButton", 0, 0) end
+      Guided.menuStep = nil; CloseDropDownMenus()
+      if GuidedMenu then ToggleDropDownMenu(1, nil, GuidedMenu, "GuidedMinimapButton", 0, 0) end
     else
-      RXP12.Toggle()
+      Guided.Toggle()
     end
   end)
   b:SetScript("OnDragStart", function()
@@ -1995,14 +1995,14 @@ local function CreateMinimapButton()
       local sc = UIParent:GetEffectiveScale()
       local cx, cy = GetCursorPosition()
       if mx and cx then
-        RXP12_Save.mmangle = atan2(cy / sc - my, cx / sc - mx)
+        Guided_Save.mmangle = atan2(cy / sc - my, cx / sc - mx)
         MinimapButtonPos()
       end
     end)
   end)
   b:SetScript("OnDragStop", function() this:SetScript("OnUpdate", nil) end)
   b:SetScript("OnEnter", function()
-    GameTooltip:SetOwner(this, "ANCHOR_LEFT"); GameTooltip:SetText("RXP12", 1, 1, 1)
+    GameTooltip:SetOwner(this, "ANCHOR_LEFT"); GameTooltip:SetText("Guided", 1, 1, 1)
     GameTooltip:AddLine("Left-click: toggle guide", 0.8, 0.8, 0.8)
     GameTooltip:AddLine("Right-click: menu", 0.8, 0.8, 0.8); GameTooltip:Show()
   end)
@@ -2010,9 +2010,9 @@ local function CreateMinimapButton()
   MinimapButtonPos()
 end
 
-function RXP12.UpdateMinimapButton()
+function Guided.UpdateMinimapButton()
   CreateMinimapButton()
-  if RXP12_Save.minimap == false then RXP12MinimapButton:Hide() else RXP12MinimapButton:Show() end
+  if Guided_Save.minimap == false then GuidedMinimapButton:Hide() else GuidedMinimapButton:Show() end
 end
 
 -- --------------------------------------------------------- leveling tracker ----
@@ -2025,26 +2025,26 @@ local function fmtTime(sec)
   return sec.."s"
 end
 
-function RXP12.UpdateTracker()
-  if not RXP12TrackerFrame or not RXP12TrackerFrame:IsVisible() then return end
-  local t = RXP12.trk; if not t then return end
+function Guided.UpdateTracker()
+  if not GuidedTrackerFrame or not GuidedTrackerFrame:IsVisible() then return end
+  local t = Guided.trk; if not t then return end
   local elapsed = GetTime() - (t.t0 or GetTime())
   local xps = (elapsed > 0) and (t.xp / elapsed) or 0
   local rem = (UnitXPMax("player") or 1) - (UnitXP("player") or 0)
   local ttl = (xps > 0 and rem > 0) and (rem / xps) or 0
   local lvlTime = GetTime() - (t.lvlStart or t.t0 or GetTime())
-  getglobal("RXP12TrackerText"):SetText(
+  getglobal("GuidedTrackerText"):SetText(
     "|cffffd200Level "..UnitLevel("player").."|r |cff999999("..fmtTime(lvlTime)..")|r\n"..
     "XP/hr: |cff66cc66"..math.floor(xps * 3600).."|r\n"..
     "To level: |cff88ccff"..(ttl > 0 and fmtTime(ttl) or "--").."|r")
 end
 
 local function CreateTracker()
-  if RXP12TrackerFrame then return end
-  local f = CreateFrame("Frame", "RXP12TrackerFrame", UIParent)
+  if GuidedTrackerFrame then return end
+  local f = CreateFrame("Frame", "GuidedTrackerFrame", UIParent)
   f:SetWidth(152); f:SetHeight(56)
-  if RXP12_Save.trkpos then
-    f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", RXP12_Save.trkpos.x, RXP12_Save.trkpos.y)
+  if Guided_Save.trkpos then
+    f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", Guided_Save.trkpos.x, Guided_Save.trkpos.y)
   else
     f:SetPoint("CENTER", UIParent, "CENTER", 300, 100)
   end
@@ -2057,26 +2057,26 @@ local function CreateTracker()
   f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
   f:SetScript("OnDragStart", function() this:StartMoving() end)
   f:SetScript("OnDragStop", function()
-    this:StopMovingOrSizing(); RXP12_Save.trkpos = { x = this:GetLeft(), y = this:GetTop() }
+    this:StopMovingOrSizing(); Guided_Save.trkpos = { x = this:GetLeft(), y = this:GetTop() }
   end)
-  local txt = f:CreateFontString("RXP12TrackerText", "OVERLAY", "GameFontHighlightSmall")
+  local txt = f:CreateFontString("GuidedTrackerText", "OVERLAY", "GameFontHighlightSmall")
   txt:SetPoint("TOPLEFT", f, "TOPLEFT", 8, -6); txt:SetJustifyH("LEFT")
   f.acc = 0
   f:SetScript("OnUpdate", function()
     f.acc = f.acc + (arg1 or 0)
-    if f.acc >= 1 then f.acc = 0; RXP12.UpdateTracker() end
+    if f.acc >= 1 then f.acc = 0; Guided.UpdateTracker() end
   end)
   f:Hide()
 end
 
-function RXP12.ApplyTracker()
+function Guided.ApplyTracker()
   CreateTracker()
-  if RXP12_Save.tracker then RXP12TrackerFrame:Show(); RXP12.UpdateTracker() else RXP12TrackerFrame:Hide() end
+  if Guided_Save.tracker then GuidedTrackerFrame:Show(); Guided.UpdateTracker() else GuidedTrackerFrame:Hide() end
 end
 
-function RXP12.ToggleTracker()
-  RXP12_Save.tracker = not RXP12_Save.tracker
-  RXP12.ApplyTracker()
+function Guided.ToggleTracker()
+  Guided_Save.tracker = not Guided_Save.tracker
+  Guided.ApplyTracker()
 end
 
 local OPT_TABS = { "General", "Display", "Routing", "Guides" }
@@ -2092,21 +2092,21 @@ local DUNGEON_ORDER = {
 }
 local dungeonChecks = {}
 
-function RXP12.OptTab(name)
-  RXP12.optTab = name
+function Guided.OptTab(name)
+  Guided.optTab = name
   for i = 1, table.getn(OPT_TABS) do
     local nm = OPT_TABS[i]
-    local pnl = getglobal("RXP12OptPanel"..nm)
-    local btn = getglobal("RXP12OptTab"..nm)
+    local pnl = getglobal("GuidedOptPanel"..nm)
+    local btn = getglobal("GuidedOptTab"..nm)
     if pnl then if nm == name then pnl:Show() else pnl:Hide() end end
     if btn then if nm == name then btn:LockHighlight() else btn:UnlockHighlight() end end
   end
 end
 
-function RXP12.RefreshDungeonChecks()
+function Guided.RefreshDungeonChecks()
   for i = 1, table.getn(dungeonChecks) do
     local c = dungeonChecks[i]
-    if c and c.code then c:SetChecked(RXP12_Save.dungeons[c.code] and true or false) end
+    if c and c.code then c:SetChecked(Guided_Save.dungeons[c.code] and true or false) end
   end
 end
 
@@ -2131,8 +2131,8 @@ local function MakeCheck(parent, name, label, y, getter, setter, desc)
 end
 
 local function CreateOptions()
-  if RXP12OptionsFrame then return end
-  local f = CreateFrame("Frame", "RXP12OptionsFrame", UIParent)
+  if GuidedOptionsFrame then return end
+  local f = CreateFrame("Frame", "GuidedOptionsFrame", UIParent)
   f:SetWidth(452); f:SetHeight(366)
   f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
   f:SetBackdrop({
@@ -2147,26 +2147,26 @@ local function CreateOptions()
   f:SetFrameStrata("DIALOG")
 
   local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  title:SetPoint("TOP", f, "TOP", 0, -11); title:SetText("RXP12 Options")
-  local close = CreateFrame("Button", "RXP12OptionsClose", f, "UIPanelCloseButton")
+  title:SetPoint("TOP", f, "TOP", 0, -11); title:SetText("Guided Options")
+  local close = CreateFrame("Button", "GuidedOptionsClose", f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
   close:SetScript("OnClick", function() f:Hide() end)
 
   -- tab bar
   for i = 1, table.getn(OPT_TABS) do
     local nm = OPT_TABS[i]
-    local b = CreateFrame("Button", "RXP12OptTab"..nm, f, "UIPanelButtonTemplate")
+    local b = CreateFrame("Button", "GuidedOptTab"..nm, f, "UIPanelButtonTemplate")
     b:SetWidth(104); b:SetHeight(22)
     b:SetPoint("TOPLEFT", f, "TOPLEFT", 12 + (i - 1) * 107, -30)
     b:SetText(nm)
-    b:SetScript("OnClick", function() RXP12.OptTab(nm) end)
+    b:SetScript("OnClick", function() Guided.OptTab(nm) end)
   end
   local div = f:CreateTexture(nil, "ARTWORK")
   div:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -56); div:SetPoint("TOPRIGHT", f, "TOPRIGHT", -10, -56)
   div:SetHeight(1); div:SetTexture(1, 1, 1, 0.15)
 
   local function panel(nm)
-    local pn = CreateFrame("Frame", "RXP12OptPanel"..nm, f)
+    local pn = CreateFrame("Frame", "GuidedOptPanel"..nm, f)
     pn:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -62)
     pn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 12)
     pn:Hide(); return pn
@@ -2174,50 +2174,50 @@ local function CreateOptions()
   local pG, pD, pR, pGu = panel("General"), panel("Display"), panel("Routing"), panel("Guides")
 
   -- ---------- General ----------
-  MakeCheck(pG, "RXP12OptAuto", "Quest auto accept/turn in", -6,
-    function() return RXP12_Save.auto end,
-    function(v) RXP12_Save.auto = v
+  MakeCheck(pG, "GuidedOptAuto", "Quest auto accept/turn in", -6,
+    function() return Guided_Save.auto end,
+    function(v) Guided_Save.auto = v
       Print("Auto quest pickup/turn-in "..(v and "|cff66cc66ON|r" or "|cffff5555OFF|r")) end,
     "Automatically accept and hand in the step's quests when you talk to the quest giver.")
-  MakeCheck(pG, "RXP12OptMinimap", "Enable minimap button", -34,
-    function() return RXP12_Save.minimap ~= false end,
-    function(v) RXP12_Save.minimap = v; RXP12.UpdateMinimapButton() end,
+  MakeCheck(pG, "GuidedOptMinimap", "Enable minimap button", -34,
+    function() return Guided_Save.minimap ~= false end,
+    function(v) Guided_Save.minimap = v; Guided.UpdateMinimapButton() end,
     "Add a button on the minimap. Left-click toggles the guide, right-click opens the menu.")
-  MakeCheck(pG, "RXP12OptArrow", "Show waypoint arrow", -62,
-    function() return RXP12_Save.arrow end,
-    function(v) RXP12_Save.arrow = v end,
+  MakeCheck(pG, "GuidedOptArrow", "Show waypoint arrow", -62,
+    function() return Guided_Save.arrow end,
+    function(v) Guided_Save.arrow = v end,
     "Show the on-screen arrow pointing to the current step's location.")
-  MakeCheck(pG, "RXP12OptLock", "Lock frames", -90,
-    function() return RXP12_Save.locked end,
-    function(v) RXP12_Save.locked = v end,
+  MakeCheck(pG, "GuidedOptLock", "Lock frames", -90,
+    function() return Guided_Save.locked end,
+    function(v) Guided_Save.locked = v end,
     "Prevent the guide window from being moved or resized.")
-  MakeCheck(pG, "RXP12OptTracker", "Enable leveling tracker", -118,
-    function() return RXP12_Save.tracker end,
-    function(v) RXP12_Save.tracker = v; RXP12.ApplyTracker() end,
+  MakeCheck(pG, "GuidedOptTracker", "Enable leveling tracker", -118,
+    function() return Guided_Save.tracker end,
+    function(v) Guided_Save.tracker = v; Guided.ApplyTracker() end,
     "Show experience per hour, time spent on this level, and estimated time to level.")
 
   -- ---------- Display ----------
-  local s = CreateFrame("Slider", "RXP12OptScale", pD, "OptionsSliderTemplate")
+  local s = CreateFrame("Slider", "GuidedOptScale", pD, "OptionsSliderTemplate")
   s:SetWidth(300); s:SetHeight(16); s:SetPoint("TOP", pD, "TOP", 0, -24)
   s:SetMinMaxValues(0.7, 1.5); s:SetValueStep(0.05)
-  getglobal("RXP12OptScaleLow"):SetText("0.7")
-  getglobal("RXP12OptScaleHigh"):SetText("1.5")
-  getglobal("RXP12OptScaleText"):SetText("Window scale")
-  s:SetValue(RXP12_Save.scale or 1)
+  getglobal("GuidedOptScaleLow"):SetText("0.7")
+  getglobal("GuidedOptScaleHigh"):SetText("1.5")
+  getglobal("GuidedOptScaleText"):SetText("Window scale")
+  s:SetValue(Guided_Save.scale or 1)
   s:SetScript("OnValueChanged", function()
-    RXP12_Save.scale = this:GetValue()
-    if RXP12Frame then RXP12Frame:SetScale(RXP12_Save.scale) end
+    Guided_Save.scale = this:GetValue()
+    if GuidedFrame then GuidedFrame:SetScale(Guided_Save.scale) end
   end)
-  local op = CreateFrame("Slider", "RXP12OptOpacity", pD, "OptionsSliderTemplate")
+  local op = CreateFrame("Slider", "GuidedOptOpacity", pD, "OptionsSliderTemplate")
   op:SetWidth(300); op:SetHeight(16); op:SetPoint("TOP", pD, "TOP", 0, -72)
   op:SetMinMaxValues(0, 1); op:SetValueStep(0.05)
-  getglobal("RXP12OptOpacityLow"):SetText("0")
-  getglobal("RXP12OptOpacityHigh"):SetText("1")
-  getglobal("RXP12OptOpacityText"):SetText("Background opacity")
-  op:SetValue(RXP12_Save.opacity or 0.92)
+  getglobal("GuidedOptOpacityLow"):SetText("0")
+  getglobal("GuidedOptOpacityHigh"):SetText("1")
+  getglobal("GuidedOptOpacityText"):SetText("Background opacity")
+  op:SetValue(Guided_Save.opacity or 0.92)
   op:SetScript("OnValueChanged", function()
-    RXP12_Save.opacity = this:GetValue()
-    if RXP12Frame then RXP12Frame:SetBackdropColor(0.05, 0.05, 0.07, RXP12_Save.opacity) end
+    Guided_Save.opacity = this:GetValue()
+    if GuidedFrame then GuidedFrame:SetBackdropColor(0.05, 0.05, 0.07, Guided_Save.opacity) end
   end)
 
   -- ---------- Routing (dungeons) ----------
@@ -2230,31 +2230,31 @@ local function CreateOptions()
   rh:SetPoint("TOPLEFT", rhdiv, "BOTTOMLEFT", 0, -4); rh:SetText("Weave selected dungeons into your route.")
   for i = 1, table.getn(DUNGEON_ORDER) do
     local code = DUNGEON_ORDER[i]
-    local c = CreateFrame("CheckButton", "RXP12DungeonChk"..i, pR, "UICheckButtonTemplate")
+    local c = CreateFrame("CheckButton", "GuidedDungeonChk"..i, pR, "UICheckButtonTemplate")
     c:SetWidth(22); c:SetHeight(22)
     local col, row = 0, i - 1
     if i > 8 then col = 1; row = i - 9 end
     c:SetPoint("TOPLEFT", pR, "TOPLEFT", 2 + col * 208, -52 - row * 23)
     getglobal(c:GetName().."Text"):SetText(DUNGEON_NAMES[code] or code)
     c.code = code
-    c:SetChecked(RXP12_Save.dungeons[code] and true or false)
+    c:SetChecked(Guided_Save.dungeons[code] and true or false)
     c:SetScript("OnClick", function()
-      RXP12_Save.dungeons[this.code] = this:GetChecked() and true or nil
-      RXP12.BuildActive(); RXP12.SkipForward(); RXP12.UpdateUI()
+      Guided_Save.dungeons[this.code] = this:GetChecked() and true or nil
+      Guided.BuildActive(); Guided.SkipForward(); Guided.UpdateUI()
     end)
     dungeonChecks[i] = c
   end
-  local none = CreateFrame("Button", "RXP12DungeonNone", pR, "UIPanelButtonTemplate")
+  local none = CreateFrame("Button", "GuidedDungeonNone", pR, "UIPanelButtonTemplate")
   none:SetWidth(70); none:SetHeight(20); none:SetPoint("BOTTOMLEFT", pR, "BOTTOMLEFT", 2, 6); none:SetText("None")
   none:SetScript("OnClick", function()
-    RXP12_Save.dungeons = {}; RXP12.RefreshDungeonChecks()
-    RXP12.BuildActive(); RXP12.SkipForward(); RXP12.UpdateUI()
+    Guided_Save.dungeons = {}; Guided.RefreshDungeonChecks()
+    Guided.BuildActive(); Guided.SkipForward(); Guided.UpdateUI()
   end)
-  local allb = CreateFrame("Button", "RXP12DungeonAll", pR, "UIPanelButtonTemplate")
+  local allb = CreateFrame("Button", "GuidedDungeonAll", pR, "UIPanelButtonTemplate")
   allb:SetWidth(70); allb:SetHeight(20); allb:SetPoint("LEFT", none, "RIGHT", 8, 0); allb:SetText("All")
   allb:SetScript("OnClick", function()
-    for i = 1, table.getn(DUNGEON_ORDER) do RXP12_Save.dungeons[DUNGEON_ORDER[i]] = true end
-    RXP12.RefreshDungeonChecks(); RXP12.BuildActive(); RXP12.SkipForward(); RXP12.UpdateUI()
+    for i = 1, table.getn(DUNGEON_ORDER) do Guided_Save.dungeons[DUNGEON_ORDER[i]] = true end
+    Guided.RefreshDungeonChecks(); Guided.BuildActive(); Guided.SkipForward(); Guided.UpdateUI()
   end)
   local pnote = pR:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   pnote:SetPoint("BOTTOMRIGHT", pR, "BOTTOMRIGHT", -2, 10); pnote:SetJustifyH("RIGHT")
@@ -2264,7 +2264,7 @@ local function CreateOptions()
   local gh = pGu:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   gh:SetPoint("TOPLEFT", pGu, "TOPLEFT", 2, -2); gh:SetWidth(404); gh:SetJustifyH("LEFT")
   gh:SetText("Paste a guide (a RegisterGuide([[...]]) block or raw text), then Import -- loads immediately, no restart.")
-  local eb = CreateFrame("EditBox", "RXP12ImportEdit", pGu)
+  local eb = CreateFrame("EditBox", "GuidedImportEdit", pGu)
   eb:SetMultiLine(true); eb:SetMaxLetters(0); eb:SetAutoFocus(false)
   eb:SetPoint("TOPLEFT", pGu, "TOPLEFT", 2, -36)
   eb:SetPoint("TOPRIGHT", pGu, "TOPRIGHT", -2, -36); eb:SetHeight(150)
@@ -2276,104 +2276,107 @@ local function CreateOptions()
     insets = { left = 3, right = 3, top = 3, bottom = 3 } })
   eb:SetBackdropColor(0, 0, 0, 0.7)
   eb:SetScript("OnEscapePressed", function() this:ClearFocus() end)
-  local impb = CreateFrame("Button", "RXP12ImportDo", pGu, "UIPanelButtonTemplate")
+  local impb = CreateFrame("Button", "GuidedImportDo", pGu, "UIPanelButtonTemplate")
   impb:SetWidth(90); impb:SetHeight(22); impb:SetPoint("TOPLEFT", eb, "BOTTOMLEFT", 0, -8); impb:SetText("Import")
   impb:SetScript("OnClick", function()
-    local ok, n = pcall(RXP12.ImportGuide, eb:GetText())
-    if ok and n and n > 0 then Print("Imported "..n.." guide(s)."); eb:SetText(""); RXP12.UpdateUI()
+    local ok, n = pcall(Guided.ImportGuide, eb:GetText())
+    if ok and n and n > 0 then Print("Imported "..n.." guide(s)."); eb:SetText(""); Guided.UpdateUI()
     else Print("|cffff5050Import failed|r -- paste a guide or a RegisterGuide([[...]]) block.") end
   end)
-  local clrb = CreateFrame("Button", "RXP12ImportClear", pGu, "UIPanelButtonTemplate")
+  local clrb = CreateFrame("Button", "GuidedImportClear", pGu, "UIPanelButtonTemplate")
   clrb:SetWidth(70); clrb:SetHeight(22); clrb:SetPoint("LEFT", impb, "RIGHT", 8, 0); clrb:SetText("Clear")
   clrb:SetScript("OnClick", function() eb:SetText("") end)
-  local detb = CreateFrame("Button", "RXP12OptDetect", pGu, "UIPanelButtonTemplate")
+  local detb = CreateFrame("Button", "GuidedOptDetect", pGu, "UIPanelButtonTemplate")
   detb:SetWidth(132); detb:SetHeight(22); detb:SetPoint("BOTTOMLEFT", pGu, "BOTTOMLEFT", 2, 6)
   detb:SetText("Auto-detect guide")
   detb:SetScript("OnClick", function()
-    local b = RXP12.AutoSelectGuide(); if b then RXP12.LoadGuideByName(b) end
+    local b = Guided.AutoSelectGuide(); if b then Guided.LoadGuideByName(b) end
   end)
-  local rstb = CreateFrame("Button", "RXP12OptReset", pGu, "UIPanelButtonTemplate")
+  local rstb = CreateFrame("Button", "GuidedOptReset", pGu, "UIPanelButtonTemplate")
   rstb:SetWidth(120); rstb:SetHeight(22); rstb:SetPoint("BOTTOMRIGHT", pGu, "BOTTOMRIGHT", -2, 6)
   rstb:SetText("Reset progress")
   rstb:SetScript("OnClick", function()
-    RXP12.seen = {}; RXP12.activeStickies = {}
-    if RXP12_Save.done then RXP12_Save.done[RXP12_Save.guide] = nil end
-    RXP12.SetStep(1); Print("Reset to step 1.")
+    Guided.seen = {}; Guided.activeStickies = {}
+    if Guided_Save.done then Guided_Save.done[Guided_Save.guide] = nil end
+    Guided.SetStep(1); Print("Reset to step 1.")
   end)
 
   f:Hide()
-  RXP12.OptTab("General")
+  Guided.OptTab("General")
 end
 
-function RXP12.ToggleOptions(tab)
+function Guided.ToggleOptions(tab)
   CreateOptions()
-  if RXP12OptionsFrame:IsVisible() then
-    if tab then RXP12.OptTab(tab) else RXP12OptionsFrame:Hide() end
+  if GuidedOptionsFrame:IsVisible() then
+    if tab then Guided.OptTab(tab) else GuidedOptionsFrame:Hide() end
     return
   end
   -- sync widgets to current state before showing
-  if RXP12OptAuto then RXP12OptAuto:SetChecked(RXP12_Save.auto and true or false) end
-  if RXP12OptArrow then RXP12OptArrow:SetChecked(RXP12_Save.arrow and true or false) end
-  if RXP12OptLock then RXP12OptLock:SetChecked(RXP12_Save.locked and true or false) end
-  if RXP12OptMinimap then RXP12OptMinimap:SetChecked(RXP12_Save.minimap ~= false) end
-  if RXP12OptScale then RXP12OptScale:SetValue(RXP12_Save.scale or 1) end
-  if RXP12OptOpacity then RXP12OptOpacity:SetValue(RXP12_Save.opacity or 0.92) end
-  if RXP12OptTracker then RXP12OptTracker:SetChecked(RXP12_Save.tracker == true) end
-  RXP12.RefreshDungeonChecks()
-  RXP12.OptTab(tab or RXP12.optTab or "General")
-  RXP12OptionsFrame:Show()
+  if GuidedOptAuto then GuidedOptAuto:SetChecked(Guided_Save.auto and true or false) end
+  if GuidedOptArrow then GuidedOptArrow:SetChecked(Guided_Save.arrow and true or false) end
+  if GuidedOptLock then GuidedOptLock:SetChecked(Guided_Save.locked and true or false) end
+  if GuidedOptMinimap then GuidedOptMinimap:SetChecked(Guided_Save.minimap ~= false) end
+  if GuidedOptScale then GuidedOptScale:SetValue(Guided_Save.scale or 1) end
+  if GuidedOptOpacity then GuidedOptOpacity:SetValue(Guided_Save.opacity or 0.92) end
+  if GuidedOptTracker then GuidedOptTracker:SetChecked(Guided_Save.tracker == true) end
+  Guided.RefreshDungeonChecks()
+  Guided.OptTab(tab or Guided.optTab or "General")
+  GuidedOptionsFrame:Show()
 end
 
 -- ----------------------------------------------------------- guide import ----
 -- Register pasted guides at runtime (no client restart) via the same path guide
 -- files use. Accepts either raw guide text or one/more RXPGuides.RegisterGuide([[
 -- ... ]]) blocks. Persists the raw text per character so imports survive /reload.
-function RXP12.ShowDungeons() RXP12.ToggleOptions("Routing") end
+function Guided.ShowDungeons() Guided.ToggleOptions("Routing") end
 
-function RXP12.ImportGuide(text)
+function Guided.ImportGuide(text)
   if not text or trim(text) == "" then return 0 end
   local blocks = {}
   for block in string.gfind(text, "%[%[(.-)%]%]") do tinsert(blocks, block) end
   if table.getn(blocks) == 0 then blocks = { text } end   -- raw guide body, no [[ ]]
-  RXP12_Save.imports = RXP12_Save.imports or {}
+  Guided_Save.imports = Guided_Save.imports or {}
   local n = 0
   for i = 1, table.getn(blocks) do
-    local before = table.getn(RXP12.guideOrder)
-    local ok = pcall(RXP12.RegisterGuide, blocks[i])
-    if ok and table.getn(RXP12.guideOrder) >= before then
-      tinsert(RXP12_Save.imports, blocks[i]); n = n + 1
+    local before = table.getn(Guided.guideOrder)
+    local ok = pcall(Guided.RegisterGuide, blocks[i])
+    if ok and table.getn(Guided.guideOrder) >= before then
+      tinsert(Guided_Save.imports, blocks[i]); n = n + 1
     end
   end
   return n
 end
 
-function RXP12.ShowImport()
-  RXP12.ToggleOptions("Guides")
-  if RXP12ImportEdit then RXP12ImportEdit:SetFocus() end
+function Guided.ShowImport()
+  Guided.ToggleOptions("Guides")
+  if GuidedImportEdit then GuidedImportEdit:SetFocus() end
 end
 
-function RXP12.Show() if RXP12Frame then RXP12Frame:Show(); RXP12_Save.shown = true end end
-function RXP12.Hide() if RXP12Frame then RXP12Frame:Hide(); RXP12_Save.shown = false end end
-function RXP12.Toggle()
-  if RXP12Frame and RXP12Frame:IsVisible() then RXP12.Hide() else RXP12.Show() end
+function Guided.Show() if GuidedFrame then GuidedFrame:Show(); Guided_Save.shown = true end end
+function Guided.Hide() if GuidedFrame then GuidedFrame:Hide(); Guided_Save.shown = false end end
+function Guided.Toggle()
+  if GuidedFrame and GuidedFrame:IsVisible() then Guided.Hide() else Guided.Show() end
 end
 
 -- --------------------------------------------------------------- defaults ----
 local function Defaults()
-  RXP12_Save = RXP12_Save or {}
-  if RXP12_Save.step == nil then RXP12_Save.step = 1 end
-  if RXP12_Save.shown == nil then RXP12_Save.shown = true end
-  if RXP12_Save.auto == nil then RXP12_Save.auto = false end   -- auto quest pickup/turn-in (opt-in)
-  if RXP12_Save.arrow == nil then RXP12_Save.arrow = true end
-  if RXP12_Save.locked == nil then RXP12_Save.locked = false end
-  if RXP12_Save.scale == nil then RXP12_Save.scale = 0.8 end
-  if RXP12_Save.opacity == nil then RXP12_Save.opacity = 0.92 end
-  if RXP12_Save.dungeons == nil then RXP12_Save.dungeons = {} end
-  if RXP12_Save.done == nil then RXP12_Save.done = {} end   -- legacy (unused)
-  if RXP12_Save.doneQuests == nil then RXP12_Save.doneQuests = {} end  -- [questId]=true: observed hand-ins
-  if RXP12_Save.minimap == nil then RXP12_Save.minimap = true end
-  if RXP12_Save.splits == nil then RXP12_Save.splits = {} end
-  if RXP12_Save.tracker == nil then RXP12_Save.tracker = false end
+  Guided_Save = Guided_Save or {}
+  if RXP12_Save and Guided_Save.step == nil then     -- carry over old settings once
+    for k, v in pairs(RXP12_Save) do Guided_Save[k] = v end
+  end
+  if Guided_Save.step == nil then Guided_Save.step = 1 end
+  if Guided_Save.shown == nil then Guided_Save.shown = true end
+  if Guided_Save.auto == nil then Guided_Save.auto = false end   -- auto quest pickup/turn-in (opt-in)
+  if Guided_Save.arrow == nil then Guided_Save.arrow = true end
+  if Guided_Save.locked == nil then Guided_Save.locked = false end
+  if Guided_Save.scale == nil then Guided_Save.scale = 0.8 end
+  if Guided_Save.opacity == nil then Guided_Save.opacity = 0.92 end
+  if Guided_Save.dungeons == nil then Guided_Save.dungeons = {} end
+  if Guided_Save.done == nil then Guided_Save.done = {} end   -- legacy (unused)
+  if Guided_Save.doneQuests == nil then Guided_Save.doneQuests = {} end  -- [questId]=true: observed hand-ins
+  if Guided_Save.minimap == nil then Guided_Save.minimap = true end
+  if Guided_Save.splits == nil then Guided_Save.splits = {} end
+  if Guided_Save.tracker == nil then Guided_Save.tracker = false end
 end
 
 -- score a guide for "is this the right one to start me on?" given the player level.
@@ -2392,32 +2395,32 @@ end
 -- Auto-pick the starting guide from the player's race/class (via each guide's
 -- #defaultfor condition) and level (via the #name "N-M" range). Skips if the
 -- character already has a saved guide. Returns the chosen guide name (or nil).
-function RXP12.AutoSelectGuide()
+function Guided.AutoSelectGuide()
   local lvl = UnitLevel("player") or 1
   local best, bestScore
-  for i = 1, table.getn(RXP12.guideOrder) do
-    local gname = RXP12.guideOrder[i]
-    local g = RXP12.guides[gname]
+  for i = 1, table.getn(Guided.guideOrder) do
+    local gname = Guided.guideOrder[i]
+    local g = Guided.guides[gname]
     -- eligible if it has no #defaultfor, or its #defaultfor matches this character
-    if RXP12.GuideVisible(g) and (not g.defaultfor or RXP12.EvalCondition(g.defaultfor)) then
+    if Guided.GuideVisible(g) and (not g.defaultfor or Guided.EvalCondition(g.defaultfor)) then
       local score = GuideScore(g, lvl)
       if not bestScore or score > bestScore then best = gname; bestScore = score end
     end
   end
-  return best or RXP12.guideOrder[1]
+  return best or Guided.guideOrder[1]
 end
 
 local function SelectDefaultGuide()
-  if RXP12_Save.guide and RXP12.guides[RXP12_Save.guide] then return end
-  local best = RXP12.AutoSelectGuide()
+  if Guided_Save.guide and Guided.guides[Guided_Save.guide] then return end
+  local best = Guided.AutoSelectGuide()
   if best then
-    RXP12_Save.guide = best
-    RXP12_Save.step = 1
+    Guided_Save.guide = best
+    Guided_Save.step = 1
   end
 end
 
 -- ---------------------------------------------------------------- events ----
-local ev = CreateFrame("Frame", "RXP12Events")
+local ev = CreateFrame("Frame", "GuidedEvents")
 ev:RegisterEvent("VARIABLES_LOADED")
 ev:RegisterEvent("PLAYER_LOGIN")
 ev:RegisterEvent("QUEST_LOG_UPDATE")
@@ -2425,12 +2428,12 @@ ev:RegisterEvent("UNIT_QUEST_LOG_CHANGED")
 ev:RegisterEvent("PLAYER_LEVEL_UP")
 ev:RegisterEvent("PLAYER_XP_UPDATE")
 ev:RegisterEvent("SKILL_LINES_CHANGED")
-ev:RegisterEvent("QUEST_DETAIL")      -- auto quest interaction (gated on RXP12_Save.auto)
+ev:RegisterEvent("QUEST_DETAIL")      -- auto quest interaction (gated on Guided_Save.auto)
 ev:RegisterEvent("QUEST_PROGRESS")
 ev:RegisterEvent("QUEST_COMPLETE")
 ev:RegisterEvent("QUEST_GREETING")
 ev:RegisterEvent("GOSSIP_SHOW")
-ev:RegisterEvent("TAXIMAP_OPENED")     -- auto flight paths (gated on RXP12_Save.auto)
+ev:RegisterEvent("TAXIMAP_OPENED")     -- auto flight paths (gated on Guided_Save.auto)
 
 local function OnEvent()
   if event == "VARIABLES_LOADED" then
@@ -2438,61 +2441,61 @@ local function OnEvent()
   elseif event == "PLAYER_LOGIN" then
     Defaults()
     local _, c = UnitClass("player"); PLAYER_CLASS = c
-    RXP12.me.class = string.lower(c or "")
-    RXP12.me.race = normalize(UnitRace("player"))
-    RXP12.me.faction = string.lower(UnitFactionGroup("player") or "")
-    if RXP12_Save.imports then   -- restore guides imported in earlier sessions
-      for i = 1, table.getn(RXP12_Save.imports) do pcall(RXP12.RegisterGuide, RXP12_Save.imports[i]) end
+    Guided.me.class = string.lower(c or "")
+    Guided.me.race = normalize(UnitRace("player"))
+    Guided.me.faction = string.lower(UnitFactionGroup("player") or "")
+    if Guided_Save.imports then   -- restore guides imported in earlier sessions
+      for i = 1, table.getn(Guided_Save.imports) do pcall(Guided.RegisterGuide, Guided_Save.imports[i]) end
     end
     SelectDefaultGuide()
-    RXP12.BuildActive()
+    Guided.BuildActive()
     CreateUI()
     CreateArrow()
-    RXP12.UpdateMinimapButton()
-    RXP12.trk = { t0 = GetTime(), xp = 0, lastXP = UnitXP("player") or 0,
+    Guided.UpdateMinimapButton()
+    Guided.trk = { t0 = GetTime(), xp = 0, lastXP = UnitXP("player") or 0,
                   lastMax = UnitXPMax("player") or 1, lvlStart = GetTime() }
-    RXP12.ApplyTracker()
-    if RXP12_Save.scale and RXP12Frame then RXP12Frame:SetScale(RXP12_Save.scale) end
-    if RXP12_Save.shown then RXP12.Show() else RXP12.Hide() end
-    RXP12.SkipForward()   -- resume at the first not-yet-completed step
-    Print("loaded. Guide: |cffffd200"..(RXP12_Save.guide or "none")
-      .."|r  (/rxp12 list · /rxp12 detect · /rxp12 options)")
+    Guided.ApplyTracker()
+    if Guided_Save.scale and GuidedFrame then GuidedFrame:SetScale(Guided_Save.scale) end
+    if Guided_Save.shown then Guided.Show() else Guided.Hide() end
+    Guided.SkipForward()   -- resume at the first not-yet-completed step
+    Print("loaded. Guide: |cffffd200"..(Guided_Save.guide or "none")
+      .."|r  (/guided list · /guided detect · /guided options)")
   elseif event == "QUEST_LOG_UPDATE" or event == "UNIT_QUEST_LOG_CHANGED"
       or event == "PLAYER_LEVEL_UP" then
     if event == "PLAYER_LEVEL_UP" then
-      local t = RXP12.trk
+      local t = Guided.trk
       if t then
         local newlv = tonumber(arg1) or UnitLevel("player")
-        RXP12_Save.splits[newlv - 1] = GetTime() - (t.lvlStart or GetTime())
+        Guided_Save.splits[newlv - 1] = GetTime() - (t.lvlStart or GetTime())
         t.lvlStart = GetTime(); t.lastXP = UnitXP("player") or 0; t.lastMax = UnitXPMax("player") or 1
       end
-      RXP12.BuildActive()   -- re-filter maxlevel/level steps
+      Guided.BuildActive()   -- re-filter maxlevel/level steps
     end
-    RXP12.CheckAuto()
-    RXP12.UpdateUI()
+    Guided.CheckAuto()
+    Guided.UpdateUI()
   elseif event == "SKILL_LINES_CHANGED" then
     -- re-filter .skill-gated steps when a profession changes (skip mid-combat to
     -- avoid churn from weapon-skill ups)
     if not (UnitAffectingCombat and UnitAffectingCombat("player")) then
-      RXP12.BuildActive(); RXP12.CheckAuto(); RXP12.UpdateUI()
+      Guided.BuildActive(); Guided.CheckAuto(); Guided.UpdateUI()
     end
   elseif event == "PLAYER_XP_UPDATE" then
-    local t = RXP12.trk
+    local t = Guided.trk
     if t then
       local cur = UnitXP("player") or 0
       local g = (cur >= t.lastXP) and (cur - t.lastXP) or ((t.lastMax - t.lastXP) + cur)
       if g > 0 then t.xp = t.xp + g end
       t.lastXP = cur; t.lastMax = UnitXPMax("player") or 1
-      RXP12.UpdateTracker()
+      Guided.UpdateTracker()
     end
-    RXP12.SkipForward(); RXP12.UpdateUI()   -- advance/hide .xp grind gates
+    Guided.SkipForward(); Guided.UpdateUI()   -- advance/hide .xp grind gates
   elseif event == "TAXIMAP_OPENED" then
-    RXP12.HandleTaxi()
+    Guided.HandleTaxi()
   elseif event == "QUEST_DETAIL" or event == "QUEST_PROGRESS"
       or event == "QUEST_COMPLETE" or event == "QUEST_GREETING"
       or event == "GOSSIP_SHOW" then
-    if event == "GOSSIP_SHOW" then RXP12.HandleTaxiGossip() end
-    RXP12.HandleQuestEvent(event)
+    if event == "GOSSIP_SHOW" then Guided.HandleTaxiGossip() end
+    Guided.HandleQuestEvent(event)
   end
 end
 
@@ -2502,59 +2505,59 @@ ev:SetScript("OnEvent", function()
 end)
 
 -- ----------------------------------------------------------------- slash ----
-SLASH_RXP121 = "/rxp12"
-SLASH_RXP122 = "/rxp"
-SlashCmdList["RXP12"] = function(msg)
+SLASH_GUIDED1 = "/guided"
+SLASH_GUIDED2 = "/gd"
+SlashCmdList["GUIDED"] = function(msg)
   msg = trim(string.lower(msg or ""))
   local _, _, cmd, arg = string.find(msg, "^(%a*)%s*(.*)$")
-  if cmd == "next" then RXP12.Advance()
-  elseif cmd == "prev" or cmd == "back" then RXP12.Back()
-  elseif cmd == "target" then RXP12.TargetStep()
-  elseif cmd == "use" then RXP12.UseStep()
-  elseif cmd == "tracker" then RXP12.ToggleTracker()
+  if cmd == "next" then Guided.Advance()
+  elseif cmd == "prev" or cmd == "back" then Guided.Back()
+  elseif cmd == "target" then Guided.TargetStep()
+  elseif cmd == "use" then Guided.UseStep()
+  elseif cmd == "tracker" then Guided.ToggleTracker()
   elseif cmd == "minimap" then
-    RXP12_Save.minimap = (RXP12_Save.minimap == false); RXP12.UpdateMinimapButton()
-    Print("Minimap button "..(RXP12_Save.minimap ~= false and "shown" or "hidden"))
-  elseif cmd == "options" or cmd == "config" or cmd == "opt" then RXP12.ToggleOptions()
-  elseif cmd == "dungeons" then RXP12.ShowDungeons()
+    Guided_Save.minimap = (Guided_Save.minimap == false); Guided.UpdateMinimapButton()
+    Print("Minimap button "..(Guided_Save.minimap ~= false and "shown" or "hidden"))
+  elseif cmd == "options" or cmd == "config" or cmd == "opt" then Guided.ToggleOptions()
+  elseif cmd == "dungeons" then Guided.ShowDungeons()
   elseif cmd == "import" then
-    if arg == "clear" then RXP12_Save.imports = {}; Print("Cleared imported guides -- /reload to apply.")
-    else RXP12.ShowImport() end
+    if arg == "clear" then Guided_Save.imports = {}; Print("Cleared imported guides -- /reload to apply.")
+    else Guided.ShowImport() end
   elseif cmd == "auto" then
-    RXP12_Save.auto = not RXP12_Save.auto
-    if RXP12OptAuto then RXP12OptAuto:SetChecked(RXP12_Save.auto and true or false) end
-    Print("Auto quest pickup/turn-in "..(RXP12_Save.auto and "|cff66cc66ON|r" or "|cffff5555OFF|r"))
+    Guided_Save.auto = not Guided_Save.auto
+    if GuidedOptAuto then GuidedOptAuto:SetChecked(Guided_Save.auto and true or false) end
+    Print("Auto quest pickup/turn-in "..(Guided_Save.auto and "|cff66cc66ON|r" or "|cffff5555OFF|r"))
   elseif cmd == "debug" then
-    RXP12.debug = not RXP12.debug
-    Print("Debug "..(RXP12.debug and "|cff66cc66ON|r -- talk to a quest NPC and watch chat" or "|cffff5555OFF|r"))
+    Guided.debug = not Guided.debug
+    Print("Debug "..(Guided.debug and "|cff66cc66ON|r -- talk to a quest NPC and watch chat" or "|cffff5555OFF|r"))
   elseif cmd == "detect" then
-    local best = RXP12.AutoSelectGuide()
+    local best = Guided.AutoSelectGuide()
     if best then
-      RXP12_Save.guide = best; RXP12_Save.step = 1; RXP12.seen = {}; RXP12.activeStickies = {}
-      RXP12.BuildActive(); RXP12.SkipForward(); RXP12.Show()
-      Print("Auto-selected for "..(RXP12.me.race or "?").." "..(RXP12.me.class or "")..": |cffffd200"..best.."|r")
+      Guided_Save.guide = best; Guided_Save.step = 1; Guided.seen = {}; Guided.activeStickies = {}
+      Guided.BuildActive(); Guided.SkipForward(); Guided.Show()
+      Print("Auto-selected for "..(Guided.me.race or "?").." "..(Guided.me.class or "")..": |cffffd200"..best.."|r")
     else
       Print("No guide matched your class/race/level.")
     end
-  elseif cmd == "reset" then RXP12.seen = {}; RXP12.activeStickies = {}; if RXP12_Save.done then RXP12_Save.done[RXP12_Save.guide] = nil end; RXP12.SetStep(1); Print("Reset to step 1.")
+  elseif cmd == "reset" then Guided.seen = {}; Guided.activeStickies = {}; if Guided_Save.done then Guided_Save.done[Guided_Save.guide] = nil end; Guided.SetStep(1); Print("Reset to step 1.")
   elseif cmd == "list" then
-    Print("Guides ("..table.getn(RXP12.guideOrder).."):")
-    for i = 1, table.getn(RXP12.guideOrder) do
-      DEFAULT_CHAT_FRAME:AddMessage("  "..i..". "..RXP12.guideOrder[i])
+    Print("Guides ("..table.getn(Guided.guideOrder).."):")
+    for i = 1, table.getn(Guided.guideOrder) do
+      DEFAULT_CHAT_FRAME:AddMessage("  "..i..". "..Guided.guideOrder[i])
     end
   elseif cmd == "load" then
     local found
-    for i = 1, table.getn(RXP12.guideOrder) do
-      if string.find(string.lower(RXP12.guideOrder[i]), arg, 1, true) then found = RXP12.guideOrder[i]; break end
+    for i = 1, table.getn(Guided.guideOrder) do
+      if string.find(string.lower(Guided.guideOrder[i]), arg, 1, true) then found = Guided.guideOrder[i]; break end
     end
     if found then
-      RXP12_Save.guide = found; RXP12_Save.step = 1; RXP12.seen = {}
-      RXP12.BuildActive()
-      RXP12.SkipForward(); RXP12.Show(); Print("Loaded: "..found.." ("..table.getn(RXP12.active).." steps for you)")
+      Guided_Save.guide = found; Guided_Save.step = 1; Guided.seen = {}
+      Guided.BuildActive()
+      Guided.SkipForward(); Guided.Show(); Print("Loaded: "..found.." ("..table.getn(Guided.active).." steps for you)")
     else
-      Print("No guide matching '"..arg.."'. /rxp12 list")
+      Print("No guide matching '"..arg.."'. /guided list")
     end
   else
-    RXP12.Toggle()
+    Guided.Toggle()
   end
 end

@@ -1,7 +1,7 @@
 -- RXP12 zone table: modern (Classic/Era) uiMapID -> zone name. RXP guides use these
 -- numeric ids in some ".goto <id>,x,y" lines; 1.12 works by zone NAME, so we map
 -- them back so the arrow/waypoint can resolve those gotos. Names match GetRealZoneText.
-RXP12_ZoneDB = {
+Guided_ZoneDB = {
   [1411]="Durotar", [1412]="Mulgore", [1413]="The Barrens", [1414]="Kalimdor",
   [1415]="Eastern Kingdoms", [1416]="Alterac Mountains", [1417]="Arathi Highlands",
   [1418]="Badlands", [1419]="Blasted Lands", [1420]="Tirisfal Glades",

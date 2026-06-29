@@ -1452,6 +1452,10 @@ local function RenderRow(r, step, i, cur, expand)
     local y = 1
     local els = step.elements or {}
     local nEls = table.getn(els)
+    local hasTickable = false
+    for j = 1, nEls do
+      if CondOK(els[j].cond) and els[j].kind ~= "note" then hasTickable = true; break end
+    end
     local stepTurnin = false
     for j = 1, nEls do if els[j].kind == "turnin" then stepTurnin = true; break end end
     local vis = 0
@@ -1462,7 +1466,7 @@ local function RenderRow(r, step, i, cur, expand)
         local er = GetElemRow(r, vis)
         er.element = el
         er.tip = el.text
-        local radio = (el.kind ~= "note")    -- objectives/actions/grind track; only notes are plain text
+        local radio = (el.kind ~= "note") or not hasTickable   -- every step gets >=1 radio (skippable)
         local txt, otype
         if el.kind == "complete" and el.id and el.obj then
           local ot, od, ty = ObjectiveText(el.id, el.obj)            -- "Young Nightsaber slain: 0/5"
@@ -1512,7 +1516,7 @@ local function RenderRow(r, step, i, cur, expand)
       local n = 0
       for k = 1, table.getn(step.elements or {}) do
         local el = step.elements[k]
-        if CondOK(el.cond) and el.kind ~= "note" then
+        if CondOK(el.cond) and (el.kind ~= "note" or not hasTickable) then
           n = n + 1
           if not el.checked then return end
         end

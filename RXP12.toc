@@ -1,0 +1,17 @@
+## Interface: 11200
+## Title: RXP12 |cff33ff99Lean Guide|r
+## Notes: Lightweight, self-contained leveling-guide engine for the 1.12 client (reads RXPGuides-format guides). By Deso.
+## Author: Deso
+## Version: 0.10-mvp
+## SavedVariablesPerCharacter: RXP12_Save
+Data\QuestNames.lua
+RXP12.lua
+Guides\Test.lua
+Guides\Classic-Alliance-1-13_Human.lua
+Guides\Classic-Alliance-1-10_NightElf.lua
+Guides\Classic-Alliance-1-14_DwarfGnome.lua
+Guides\Classic-Alliance-11-20.lua
+Guides\Classic-Horde-01-12_Durotar.lua
+Guides\Classic-Horde-1-12_Mulgore.lua
+Guides\Classic-Horde-01-14_Undead.lua
+Guides\Classic-Horde-12-22_Barrens.lua

@@ -378,6 +378,22 @@ function Guided.ParseLine(step, t)
           if not dup then tinsert(step.targets, nm) end
           step.target = step.target or nm
         end
+      elseif cmd == "isOnQuest" or cmd == "isNotOnQuest" or cmd == "isQuestComplete"
+          or cmd == "isQuestTurnedIn" or cmd == "isQuestAvailable" then
+        -- quest-state gates (RXP .isOnQuest/.isQuestTurnedIn/...): skip this step
+        -- unless the condition holds. ids are OR'd; the Not/Available forms reverse it.
+        local ids = {}
+        for v in string.gfind(rest, "%d+") do tinsert(ids, tonumber(v)) end
+        if table.getn(ids) > 0 then
+          local t, rev = "onquest", false
+          if cmd == "isNotOnQuest" then rev = true
+          elseif cmd == "isQuestComplete" then t = "complete"
+          elseif cmd == "isQuestTurnedIn" then t = "turnedin"
+          elseif cmd == "isQuestAvailable" then t = "turnedin"; rev = true end
+          step.gates = step.gates or {}
+          tinsert(step.gates, { t = t, ids = ids, rev = rev })
+        end
+        if disp then kind = "note"; etext = disp end
       elseif cmd == "timer" then
         -- ".timer <minutes>,<label>": author countdown, shown while the step is active
         local _, _, mins, lbl = string.find(rest, "([0-9.]+)%s*,?%s*(.*)")
@@ -551,6 +567,10 @@ function Guided.SetStep(i, dir)
       if ni < 1 or ni > n then break end
       i = ni; guard = guard + 1
     elseif Guided.StepDoneByIndex(i, log) then
+      local ni = i + dir
+      if ni < 1 or ni > n then break end
+      i = ni; guard = guard + 1
+    elseif st and not Guided.StepGateMet(st, log) then
       local ni = i + dir
       if ni < 1 or ni > n then break end
       i = ni; guard = guard + 1
@@ -1072,6 +1092,37 @@ end
 -- on: when reached they're pinned (shown alongside the current step) until their
 -- own condition is met, and we move on to the next non-sticky step. Stops at the
 -- first step that isn't done/sticky, or the last step.
+-- evaluate a step's .isQuest* gates against live quest state. Unmet -> the step is
+-- skipped (RXP marks step.completed). Unknown quest id (not in our DB) -> treated as
+-- met, so we never hide a step we can't judge.
+function Guided.StepGateMet(step, log)
+  if not step.gates then return true end
+  for g = 1, table.getn(step.gates) do
+    local gate = step.gates[g]
+    local met, resolvable = false, false
+    for k = 1, table.getn(gate.ids) do
+      local id = gate.ids[k]
+      local nm = QuestName(id)
+      if nm then
+        resolvable = true
+        local key = lc(nm)
+        if gate.t == "onquest" then
+          if log and log[key] then met = true end
+        elseif gate.t == "complete" then
+          if log and log[key] and log[key].complete then met = true end
+        elseif gate.t == "turnedin" then
+          if Guided_Save.doneQuests and Guided_Save.doneQuests[id] then met = true end
+        end
+      end
+    end
+    if resolvable then
+      if gate.rev then met = not met end
+      if not met then return false end
+    end
+  end
+  return true
+end
+
 -- a pinned sticky should drop once it's done OR the current step has advanced past
 -- the step it completes with (its window closed). Without this an orphaned side-step
 -- lingers while you're already several steps ahead (e.g. after abandoning a quest).
@@ -1120,6 +1171,8 @@ function Guided.SkipForward()
     elseif Guided.StepDoneByIndex(i, log) then
       Guided.RecordDone(s)                 -- auto-completed -> remember across reloads
       Guided_Save.step = i + 1
+    elseif s and not Guided.StepGateMet(s, log) then
+      Guided_Save.step = i + 1             -- quest-state gate not met -> skip (not "done")
     else
       break
     end

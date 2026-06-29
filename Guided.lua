@@ -2273,16 +2273,28 @@ local function CreateOptions()
     function() return Guided_Save.hidedone end,
     function(v) Guided_Save.hidedone = v; Guided.UpdateUI() end,
     "Remove finished steps from the list instead of greying them out.")
-  local s = CreateFrame("Slider", "GuidedOptScale", pD, "OptionsSliderTemplate")
-  s:SetWidth(300); s:SetHeight(16); s:SetPoint("TOP", pD, "TOP", 0, -34)
-  s:SetMinMaxValues(0.7, 1.5); s:SetValueStep(0.05)
-  getglobal("GuidedOptScaleLow"):SetText("0.7")
-  getglobal("GuidedOptScaleHigh"):SetText("1.5")
-  getglobal("GuidedOptScaleText"):SetText("Window scale")
-  s:SetValue(Guided_Save.scale or 1)
-  s:SetScript("OnValueChanged", function()
-    Guided_Save.scale = this:GetValue()
-    if GuidedFrame then GuidedFrame:SetScale(BASE_SCALE * Guided_Save.scale) end
+  local slbl = pD:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  slbl:SetPoint("TOPLEFT", pD, "TOPLEFT", 16, -34); slbl:SetText("Window scale")
+  local s = CreateFrame("EditBox", "GuidedOptScale", pD, "InputBoxTemplate")
+  s:SetWidth(46); s:SetHeight(20); s:SetPoint("LEFT", slbl, "RIGHT", 14, 0)
+  s:SetAutoFocus(false); s:SetMaxLetters(5)
+  s:SetText(string.format("%.3g", Guided_Save.scale or 1))
+  local shint = pD:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  shint:SetPoint("LEFT", s, "RIGHT", 10, 0); shint:SetText("0.5 - 2.0  (1.0 = default size)")
+  local function ApplyScaleBox()
+    local v = tonumber(s:GetText())
+    if v then
+      if v < 0.5 then v = 0.5 elseif v > 2 then v = 2 end
+      Guided_Save.scale = v
+      if GuidedFrame then GuidedFrame:SetScale(BASE_SCALE * v) end
+    end
+    s:SetText(string.format("%.3g", Guided_Save.scale or 1))
+    s:ClearFocus()
+  end
+  s:SetScript("OnEnterPressed", ApplyScaleBox)
+  s:SetScript("OnEditFocusLost", ApplyScaleBox)
+  s:SetScript("OnEscapePressed", function()
+    this:SetText(string.format("%.3g", Guided_Save.scale or 1)); this:ClearFocus()
   end)
   local op = CreateFrame("Slider", "GuidedOptOpacity", pD, "OptionsSliderTemplate")
   op:SetWidth(300); op:SetHeight(16); op:SetPoint("TOP", pD, "TOP", 0, -82)
@@ -2413,7 +2425,7 @@ function Guided.ToggleOptions(tab)
   if GuidedOptArrow then GuidedOptArrow:SetChecked(Guided_Save.arrow and true or false) end
   if GuidedOptLock then GuidedOptLock:SetChecked(Guided_Save.locked and true or false) end
   if GuidedOptMinimap then GuidedOptMinimap:SetChecked(Guided_Save.minimap ~= false) end
-  if GuidedOptScale then GuidedOptScale:SetValue(Guided_Save.scale or 1) end
+  if GuidedOptScale then GuidedOptScale:SetText(string.format("%.3g", Guided_Save.scale or 1)) end
   if GuidedOptOpacity then GuidedOptOpacity:SetValue(Guided_Save.opacity or 0.92) end
   if GuidedOptTracker then GuidedOptTracker:SetChecked(Guided_Save.tracker == true) end
   if GuidedOptFly then GuidedOptFly:SetChecked(Guided_Save.autofly ~= false) end

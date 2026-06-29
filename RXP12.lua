@@ -1564,7 +1564,7 @@ function RXP12.UpdateUI()
     for j = 1, table.getn(order) do if order[j] == cur then hasCur = true end end
     if RXP12.active[cur] and not hasCur then tinsert(order, cur) end
     table.sort(order)                                  -- stickies (earlier) above, current below
-    local sy, k = 22, 0
+    local sy, k = 6, 0
     for oi = 1, table.getn(order) do
       local st = RXP12.active[order[oi]]
       if st then
@@ -1578,7 +1578,6 @@ function RXP12.UpdateUI()
     end
     if RXP12.stepRows then local j = k + 1; while RXP12.stepRows[j] do RXP12.stepRows[j]:Hide(); j = j + 1 end end
     if k > 0 then
-      getglobal("RXP12StepHeader"):SetText("Step "..cur)
       RXP12StepFrame:SetHeight(sy + 4)
       RXP12StepFrame:SetBackdropColor(0.05, 0.05, 0.07, RXP12_Save.opacity or 0.92)
       RXP12StepFrame:Show()
@@ -1854,9 +1853,6 @@ local function CreateUI()
     tile = true, tileSize = 16, edgeSize = 16,
     insets = { left = 4, right = 4, top = 4, bottom = 4 } })
   sfr:SetBackdropColor(0.05, 0.05, 0.07, RXP12_Save.opacity or 0.92)
-  local shdr = sfr:CreateFontString("RXP12StepHeader", "OVERLAY", "GameFontNormal")
-  shdr:SetPoint("TOPLEFT", sfr, "TOPLEFT", 12, -9)
-  shdr:SetText("Current Step")
   sfr:Hide()
 
   local close = CreateFrame("Button", "RXP12FrameClose", f, "UIPanelCloseButton")

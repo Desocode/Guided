@@ -1618,13 +1618,13 @@ function RXP12.UpdateUI()
   -- active steps (pinned stickies + current), stacked in the linked top frame
   if RXP12StepFrame then
     local order = {}
-    if RXP12.active[cur] then tinsert(order, cur) end           -- main (current) step first
     if RXP12.activeStickies then
       local sk = {}
       for idx in pairs(RXP12.activeStickies) do if idx ~= cur then tinsert(sk, idx) end end
       table.sort(sk)
-      for j = 1, table.getn(sk) do tinsert(order, sk[j]) end    -- side (sticky) steps after
+      for j = 1, table.getn(sk) do tinsert(order, sk[j]) end    -- sticky side-steps first (above)
     end
+    if RXP12.active[cur] then tinsert(order, cur) end           -- main (current) step last (below)
     local sy, k = 6, 0
     for oi = 1, table.getn(order) do
       local st = RXP12.active[order[oi]]

@@ -458,14 +458,24 @@ function RXP12.SetStep(i, dir)
   if n == 0 then return end
   if i < 1 then i = 1 end
   if i > n then i = n end
-  -- never rest on a step that's already done -- a satisfied .xp gate, or a quest
-  -- we've OBSERVED completed (RXP12_Save.done). Step over it in the direction of
-  -- travel. Manually-ticked steps aren't recorded, so they stay visitable.
+  -- the current step is never a sticky side-step nor an already-done step
+  -- (satisfied .xp gate / observed-completed quest): step over those in the
+  -- direction of travel. Sticky steps get pinned (shown as side steps) when
+  -- moving forward. Manually-ticked steps aren't recorded, so they stay visitable.
   dir = dir or 1
   local log = RXP12.BuildQuestLog and RXP12.BuildQuestLog()
   local guard = 0
   while guard < 500 do
-    if RXP12.StepDoneByIndex(i, log) then
+    local st = RXP12.active[i]
+    if st and st.sticky then
+      if dir > 0 and not RXP12.StepDoneByIndex(i, log) then
+        RXP12.activeStickies = RXP12.activeStickies or {}
+        RXP12.activeStickies[i] = true
+      end
+      local ni = i + dir
+      if ni < 1 or ni > n then break end
+      i = ni; guard = guard + 1
+    elseif RXP12.StepDoneByIndex(i, log) then
       local ni = i + dir
       if ni < 1 or ni > n then break end
       i = ni; guard = guard + 1
@@ -1597,11 +1607,13 @@ function RXP12.UpdateUI()
   -- active steps (pinned stickies + current), stacked in the linked top frame
   if RXP12StepFrame then
     local order = {}
-    if RXP12.activeStickies then for idx in pairs(RXP12.activeStickies) do tinsert(order, idx) end end
-    local hasCur = false
-    for j = 1, table.getn(order) do if order[j] == cur then hasCur = true end end
-    if RXP12.active[cur] and not hasCur then tinsert(order, cur) end
-    table.sort(order)                                  -- stickies (earlier) above, current below
+    if RXP12.active[cur] then tinsert(order, cur) end           -- main (current) step first
+    if RXP12.activeStickies then
+      local sk = {}
+      for idx in pairs(RXP12.activeStickies) do if idx ~= cur then tinsert(sk, idx) end end
+      table.sort(sk)
+      for j = 1, table.getn(sk) do tinsert(order, sk[j]) end    -- side (sticky) steps after
+    end
     local sy, k = 6, 0
     for oi = 1, table.getn(order) do
       local st = RXP12.active[order[oi]]

@@ -228,12 +228,12 @@ function Guided.BuildActive()
   table.sort(Guided.dungeonCodes)
   local n = table.getn(Guided.active)
   if (Guided_Save.step or 1) > n then Guided_Save.step = (n > 0 and n) or 1 end
-  -- step numbers skip sticky "side" steps (helpers, not main numbered steps)
-  Guided.dispNum = {}; Guided.numMain = 0
-  for i = 1, n do
-    if Guided.active[i].sticky then Guided.dispNum[i] = nil
-    else Guided.numMain = Guided.numMain + 1; Guided.dispNum[i] = Guided.numMain end
-  end
+  -- number every active step in sequence, sticky side-steps included (RXP does
+  -- this -- the step after a sticky keeps the next number, so e.g. a kill side-step
+  -- is 2 and the grind after it is 3, not 2).
+  Guided.dispNum = {}
+  for i = 1, n do Guided.dispNum[i] = i end
+  Guided.numMain = n
 end
 
 -- resolve a quest id to its name via the bundled quest-name DB (Data\QuestNames.lua).

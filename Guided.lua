@@ -592,10 +592,53 @@ local function ParseGoto(raw)
   return f[1], nil, tonumber(f[2]), tonumber(f[3])                 -- zoneName,x,y
 end
 
--- World-map pin integration was removed with the pfQuest dependency. The on-screen
--- direction arrow (GuidedArrow) handles navigation natively. Kept as a no-op so the
--- existing call sites don't need to change; a native world-map pin may return later.
+-- World-map pin (self-contained, no Astrolabe/Ace). On the destination zone's own
+-- map the goto x,y (0-100) map straight onto WorldMapButton, so no cross-map
+-- translation is needed: pin = SetPoint(CENTER -> TOPLEFT, x%*W, -y%*H). When the
+-- map shows a different zone/continent the pin hides (full cross-continent
+-- placement would need Astrolabe's static zone-size tables; deferred).
+local function EnsureMapPin()
+  if GuidedMapPin then return end
+  if not WorldMapButton then return end
+  local pin = CreateFrame("Frame", "GuidedMapPin", WorldMapButton)
+  pin:SetWidth(18); pin:SetHeight(18)
+  pin:SetFrameLevel(WorldMapButton:GetFrameLevel() + 10)
+  local t = pin:CreateTexture(nil, "OVERLAY")
+  t:SetAllPoints(pin)
+  t:SetTexture("Interface\\GossipFrame\\AvailableQuestIcon")   -- yellow "!" = your destination
+  pin:Hide()
+end
+
+-- localized name of the zone the world map is currently DISPLAYING (nil for the
+-- continent/world view). Matches the names guides use in ".goto Zone,x,y".
+local function DisplayedZoneName()
+  local c, z = GetCurrentMapContinent(), GetCurrentMapZone()
+  if not c or c <= 0 or not z or z <= 0 then return nil end
+  local zones = { GetMapZones(c) }
+  return zones[z]
+end
+
+function Guided.UpdateWorldMapPins()
+  if not WorldMapFrame or not WorldMapFrame:IsVisible() then return end
+  EnsureMapPin()
+  if not GuidedMapPin then return end
+  GuidedMapPin:Hide()
+  local gs = Guided.ArrowGoto()
+  if not gs then return end
+  local zone, _, tx, ty = ParseGoto(gs)
+  if not zone or not tx or not ty then return end          -- need a named zone + coords
+  local shown = DisplayedZoneName()
+  if not shown or normalize(shown) ~= normalize(zone) then return end   -- map must show that zone
+  local w, h = WorldMapButton:GetWidth(), WorldMapButton:GetHeight()
+  if not w or w == 0 then return end
+  GuidedMapPin:ClearAllPoints()
+  GuidedMapPin:SetPoint("CENTER", WorldMapButton, "TOPLEFT", (tx / 100) * w, -(ty / 100) * h)
+  GuidedMapPin:Show()
+end
+
+-- called from UpdateUI on every step change; also driven by WORLD_MAP_UPDATE
 function Guided.SetWaypoint(step)
+  if Guided.UpdateWorldMapPins then Guided.UpdateWorldMapPins() end
 end
 
 -- Native player facing for the arrow (no pfQuest / SuperWoW needed). On 1.12 the
@@ -2649,9 +2692,11 @@ ev:RegisterEvent("QUEST_PROGRESS")
 ev:RegisterEvent("QUEST_COMPLETE")
 ev:RegisterEvent("QUEST_GREETING")
 ev:RegisterEvent("GOSSIP_SHOW")
+ev:RegisterEvent("WORLD_MAP_UPDATE")   -- reposition the world-map pin as the map opens/pans/zooms
 ev:RegisterEvent("TAXIMAP_OPENED")     -- auto flight paths (gated on Guided_Save.auto)
 
 local function OnEvent()
+  if event == "WORLD_MAP_UPDATE" then Guided.UpdateWorldMapPins(); return end
   if event == "VARIABLES_LOADED" then
     Defaults()
   elseif event == "PLAYER_LOGIN" then

@@ -186,6 +186,18 @@ local function ModeOK(step)
   if step.softcore and Guided_Save.hardcore then return false end
   return true
 end
+-- group-quest filter (RXP stepLogic.GroupCheck): with group quests off, ".group"
+-- steps are hidden and their ".solo" pairs shown; with it on, the reverse. The
+-- per-line "<< class" cond decides who the directive applies to.
+local function GroupCheck(step)
+  if step.groupquest and Guided.EvalCondition(step.groupCond) then
+    return Guided_Save.groupquests == true
+  end
+  if step.soloquest and Guided.EvalCondition(step.soloCond) then
+    return Guided_Save.groupquests ~= true
+  end
+  return true
+end
 
 function Guided.BuildActive()
   Guided.active = {}
@@ -203,7 +215,7 @@ function Guided.BuildActive()
     if st.dungeonskip and not seenD[st.dungeonskip] then seenD[st.dungeonskip] = true; tinsert(Guided.dungeonCodes, st.dungeonskip) end
     if Guided.EvalCondition(st.cond) and Guided.DungeonCheck(st)
         and (not st.maxlevel or UnitLevel("player") <= st.maxlevel)
-        and Guided.SkillCheck(st) and SeasonOK(st) and XpRateOK(st) and ModeOK(st) then
+        and Guided.SkillCheck(st) and SeasonOK(st) and XpRateOK(st) and ModeOK(st) and GroupCheck(st) then
       tinsert(Guided.active, st)
       local s = Guided.active[table.getn(Guided.active)]
       if s.label and s.label ~= true then Guided.labelIndex[s.label] = table.getn(Guided.active) end
@@ -362,6 +374,19 @@ function Guided.ParseLine(step, t)
           if not dup then tinsert(step.targets, nm) end
           step.target = step.target or nm
         end
+      elseif cmd == "group" then
+        -- ".group [N] [<<cond]": this step is meant for a party. Gated by the
+        -- "Enable group quests" setting; its paired ".solo" step shows when off.
+        step.groupquest = true; step.groupCond = lineCond
+        local _, _, gn = string.find(rest, "(%d+)")
+        gn = tonumber(gn)
+        kind = "note"
+        if disp then etext = disp
+        elseif gn and gn > 0 then etext = string.format("Group of %d+ recommended for this step", gn)
+        else etext = "Group quest - best done with others" end
+      elseif cmd == "solo" then
+        step.soloquest = true; step.soloCond = lineCond
+        if disp then kind = "note"; etext = disp end
       elseif disp then kind = "note"; etext = disp        -- any other command, show its text only
       end
     elseif first == "#" then
@@ -2176,7 +2201,7 @@ end
 local function CreateOptions()
   if GuidedOptionsFrame then return end
   local f = CreateFrame("Frame", "GuidedOptionsFrame", UIParent)
-  f:SetWidth(452); f:SetHeight(438)
+  f:SetWidth(452); f:SetHeight(464)
   f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
   f:SetBackdrop({
     bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -2280,8 +2305,12 @@ local function CreateOptions()
     function() return Guided_Save.hardcore end,
     function(v) Guided_Save.hardcore = v; Guided.BuildActive(); Guided.SkipForward(); Guided.UpdateUI() end,
     "Use the route's hardcore variants (cautious play, no risky steps).")
+  MakeCheck(pR, "GuidedOptGroup", "Enable group quests", -54,
+    function() return Guided_Save.groupquests end,
+    function(v) Guided_Save.groupquests = v; Guided.BuildActive(); Guided.SkipForward(); Guided.UpdateUI() end,
+    "Follow the route's group path for elite/dungeon quests and hide the solo alternatives. Leave off for solo play.")
   local xpr = CreateFrame("Slider", "GuidedOptXpRate", pR, "OptionsSliderTemplate")
-  xpr:SetWidth(220); xpr:SetHeight(16); xpr:SetPoint("TOPLEFT", pR, "TOPLEFT", 16, -64)
+  xpr:SetWidth(220); xpr:SetHeight(16); xpr:SetPoint("TOPLEFT", pR, "TOPLEFT", 16, -90)
   xpr:SetMinMaxValues(1, 3); xpr:SetValueStep(0.1)
   getglobal("GuidedOptXpRateLow"):SetText("1x"); getglobal("GuidedOptXpRateHigh"):SetText("3x")
   getglobal("GuidedOptXpRateText"):SetText("Server XP rate")
@@ -2290,7 +2319,7 @@ local function CreateOptions()
     Guided_Save.xprate = this:GetValue(); Guided.BuildActive(); Guided.SkipForward(); Guided.UpdateUI()
   end)
   local rhdr = pR:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  rhdr:SetPoint("TOPLEFT", pR, "TOPLEFT", 2, -100); rhdr:SetText("|cffffd200Dungeons|r")
+  rhdr:SetPoint("TOPLEFT", pR, "TOPLEFT", 2, -126); rhdr:SetText("|cffffd200Dungeons|r")
   local rhdiv = pR:CreateTexture(nil, "ARTWORK")
   rhdiv:SetPoint("TOPLEFT", rhdr, "BOTTOMLEFT", 0, -3); rhdiv:SetWidth(414); rhdiv:SetHeight(1)
   rhdiv:SetTexture(1, 1, 1, 0.12)
@@ -2302,7 +2331,7 @@ local function CreateOptions()
     c:SetWidth(22); c:SetHeight(22)
     local col, row = 0, i - 1
     if i > 8 then col = 1; row = i - 9 end
-    c:SetPoint("TOPLEFT", pR, "TOPLEFT", 2 + col * 208, -140 - row * 23)
+    c:SetPoint("TOPLEFT", pR, "TOPLEFT", 2 + col * 208, -166 - row * 23)
     getglobal(c:GetName().."Text"):SetText(DUNGEON_NAMES[code] or code)
     c.code = code
     c:SetChecked(Guided_Save.dungeons[code] and true or false)
@@ -2391,6 +2420,7 @@ function Guided.ToggleOptions(tab)
   if GuidedOptHideDone then GuidedOptHideDone:SetChecked(Guided_Save.hidedone == true) end
   if GuidedOptSkipOver then GuidedOptSkipOver:SetChecked(Guided_Save.skipoverlevel ~= false) end
   if GuidedOptHardcore then GuidedOptHardcore:SetChecked(Guided_Save.hardcore == true) end
+  if GuidedOptGroup then GuidedOptGroup:SetChecked(Guided_Save.groupquests == true) end
   if GuidedOptXpRate then GuidedOptXpRate:SetValue(Guided_Save.xprate or 1) end
   Guided.RefreshDungeonChecks()
   Guided.OptTab(tab or Guided.optTab or "General")
@@ -2458,6 +2488,7 @@ local function Defaults()
   if Guided_Save.season == nil then Guided_Save.season = 0 end   -- 0=Era, 1=SoM, 2=SoD
   if Guided_Save.xprate == nil then Guided_Save.xprate = 1 end
   if Guided_Save.hardcore == nil then Guided_Save.hardcore = false end
+  if Guided_Save.groupquests == nil then Guided_Save.groupquests = false end
 end
 
 -- score a guide for "is this the right one to start me on?" given the player level.

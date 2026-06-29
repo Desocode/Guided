@@ -1157,7 +1157,7 @@ local function ObjectiveProgress(step)
   for k = 1, table.getn(step.quests) do
     local q = step.quests[k]
     local nm = CondOK(q.cond) and QuestName(q.id)
-    if nm and (q.action == "complete" or q.action == "accept") then
+    if nm and q.action == "complete" then
       nm = lc(nm)
       for i = 1, n do
         local title, _, _, isHeader = GetQuestLogTitle(i)
@@ -1438,10 +1438,8 @@ local function RenderRow(r, step, i, cur, expand)
     -- Target / Use action buttons
     if step.targets and table.getn(step.targets) > 0 then
       local nt = table.getn(step.targets)
-      local lbl = (nt > 1) and ("Target ("..nt.." mobs)") or ("Target: "..step.targets[1])
-      r.targetBtn:SetText(lbl)
-      local w = 56 + string.len(lbl) * 6; if w > CONTENT_W then w = CONTENT_W end
-      r.targetBtn:SetWidth(w)
+      r.targetBtn:SetText(nt > 1 and ("Target ("..nt..")") or "Target")
+      r.targetBtn:SetWidth(90)
       r.targetBtn:ClearAllPoints(); r.targetBtn:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
       r.targetBtn:Show(); y = y + 22
     else r.targetBtn:Hide() end

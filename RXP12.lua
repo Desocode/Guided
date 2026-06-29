@@ -2370,7 +2370,7 @@ local function Defaults()
   if RXP12_Save.auto == nil then RXP12_Save.auto = false end   -- auto quest pickup/turn-in (opt-in)
   if RXP12_Save.arrow == nil then RXP12_Save.arrow = true end
   if RXP12_Save.locked == nil then RXP12_Save.locked = false end
-  if RXP12_Save.scale == nil then RXP12_Save.scale = 1 end
+  if RXP12_Save.scale == nil then RXP12_Save.scale = 0.8 end
   if RXP12_Save.opacity == nil then RXP12_Save.opacity = 0.92 end
   if RXP12_Save.dungeons == nil then RXP12_Save.dungeons = {} end
   if RXP12_Save.done == nil then RXP12_Save.done = {} end   -- legacy (unused)

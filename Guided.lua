@@ -2460,8 +2460,9 @@ local function CreateMinimapButton()
   b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
   b:RegisterForDrag("LeftButton")
   local icon = b:CreateTexture(nil, "BACKGROUND")
-  icon:SetWidth(20); icon:SetHeight(20); icon:SetPoint("CENTER", b, "CENTER", 0, 1)
-  icon:SetTexture("Interface\\Icons\\INV_Misc_Map_01")
+  icon:SetWidth(18); icon:SetHeight(18); icon:SetPoint("CENTER", b, "CENTER", 0, 1)
+  icon:SetTexture("Interface\\Icons\\Ability_Tracking")     -- footprints: following the path
+  icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)                  -- trim the icon border so it sits inside the ring
   local ring = b:CreateTexture(nil, "OVERLAY")
   ring:SetWidth(53); ring:SetHeight(53); ring:SetPoint("TOPLEFT", b, "TOPLEFT", 0, 0)
   ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")

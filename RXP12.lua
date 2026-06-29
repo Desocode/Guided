@@ -975,6 +975,28 @@ local KIND_ICON = {
   train    = "Interface\\GossipFrame\\TrainerGossipIcon",
   hearth   = "Interface\\Icons\\INV_Misc_Rune_01",
 }
+
+-- objective/instruction icons (matches RXP's picks): kill = crossed swords,
+-- collect = loot bag, generic complete = cross, "talk to" = speech bubble.
+local ICON_KILL    = "Interface\\GossipFrame\\BattleMasterGossipIcon"
+local ICON_COLLECT = "Interface\\GossipFrame\\VendorGossipIcon"
+local ICON_DONE    = "Interface\\GossipFrame\\HealerGossipIcon"
+local ICON_GOSSIP  = "Interface\\GossipFrame\\GossipGossipIcon"
+
+local function ElementIcon(el, otype, isTurnin)
+  if el.kind == "complete" then
+    if otype == "monster" then return ICON_KILL
+    elseif otype == "item" or otype == "object" then return ICON_COLLECT
+    else return ICON_DONE end
+  elseif el.kind == "note" then
+    local low = el.text and lc(el.text)
+    if low and (string.find(low, "talk to", 1, true) or string.find(low, "speak to", 1, true)) then
+      return isTurnin and KIND_ICON.turnin or ICON_GOSSIP   -- speech bubble, unless it's a turn-in
+    end
+    return nil
+  end
+  return KIND_ICON[el.kind]
+end
 -- text only -- the type icon is drawn as a real Texture beside the line, since
 -- 1.12 FontStrings can't render inline |T..|t escapes.
 -- strip |cAARRGGBB...|r color codes (used to grey-out finished steps uniformly)
@@ -1013,18 +1035,18 @@ local function ObjectiveText(qid, obj)
   nm = lc(nm)
   local sel = GetQuestLogSelection()
   local total = GetNumQuestLogEntries()
-  local txt, done
+  local txt, done, otype
   for i = 1, total do
     local title, _, _, isHeader = GetQuestLogTitle(i)
     if title and not isHeader and lc(title) == nm then
       SelectQuestLogEntry(i)
-      local t, _, d = GetQuestLogLeaderBoard(obj)
-      txt = t; done = d
+      local t, ty, d = GetQuestLogLeaderBoard(obj)
+      txt = t; otype = ty; done = d
       break
     end
   end
   if sel then SelectQuestLogEntry(sel) end
-  return txt, done
+  return txt, done, otype
 end
 
 local function ObjectiveCount(qid, obj)
@@ -1328,9 +1350,11 @@ local function RenderRow(r, step, i, cur, expand)
   if expand then
     -- expanded: one checkbox row per element + objective lines + progress bar
     r.fs:Hide(); r.kindIcon:Hide()
-    local y = 2
+    local y = 1
     local els = step.elements or {}
     local nEls = table.getn(els)
+    local stepTurnin = false
+    for j = 1, nEls do if els[j].kind == "turnin" then stepTurnin = true; break end end
     local vis = 0
     for j = 1, nEls do
       local el = els[j]
@@ -1340,27 +1364,22 @@ local function RenderRow(r, step, i, cur, expand)
         er.element = el
         er.tip = el.text
         local radio = (el.kind ~= "note" and el.kind ~= "level")    -- objectives/actions track; notes are text
-        local txt
+        local txt, otype
         if el.kind == "complete" and el.id and el.obj then
-          local ot, od = ObjectiveText(el.id, el.obj)                -- "Young Nightsaber slain: 0/5"
-          txt = ot or ElementLineWithCount(el)
+          local ot, od, ty = ObjectiveText(el.id, el.obj)            -- "Young Nightsaber slain: 0/5"
+          txt = ot or ElementLineWithCount(el); otype = ty
           if od ~= nil then el.checked = od and true or false end     -- radio auto-tracks the kill
         else
           txt = ElementLine(el)
         end
-        local ip = KIND_ICON[el.kind]
-        local fx
-        if radio then
-          er.check:Show(); er:SetScript("OnClick", er._onclick)
-          if el.kind ~= "complete" and ip then
-            er.icon:ClearAllPoints(); er.icon:SetPoint("TOPLEFT", er, "TOPLEFT", 21, -2)
-            er.icon:SetTexture(ip); er.icon:Show(); fx = 37
-          else
-            er.icon:Hide(); fx = 22
-          end
-        else
-          er.check:Hide(); er:SetScript("OnClick", nil); er.icon:Hide(); fx = 2
-        end
+        local ip = ElementIcon(el, otype, stepTurnin)
+        local fx = 2
+        if radio then er.check:Show(); er:SetScript("OnClick", er._onclick); fx = 22
+        else er.check:Hide(); er:SetScript("OnClick", nil) end
+        if ip then
+          er.icon:ClearAllPoints(); er.icon:SetPoint("TOPLEFT", er, "TOPLEFT", fx, -2)
+          er.icon:SetTexture(ip); er.icon:Show(); fx = fx + 16
+        else er.icon:Hide() end
         er.fs:ClearAllPoints(); er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", fx, -2); er.fs:SetWidth(CONTENT_W - fx)
         er.fs:SetText(txt)
         er.check:SetChecked(el.checked and true or false)
@@ -1368,7 +1387,7 @@ local function RenderRow(r, step, i, cur, expand)
         er:SetWidth(CONTENT_W); er:SetHeight(eh)
         er:ClearAllPoints(); er:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
         er:Show()
-        y = y + eh + 3
+        y = y + eh + 2
       end
     end
     -- (objective counts are shown inline on each .complete line above)
@@ -1545,7 +1564,7 @@ function RXP12.UpdateUI()
     for j = 1, table.getn(order) do if order[j] == cur then hasCur = true end end
     if RXP12.active[cur] and not hasCur then tinsert(order, cur) end
     table.sort(order)                                  -- stickies (earlier) above, current below
-    local sy, k = 28, 0
+    local sy, k = 22, 0
     for oi = 1, table.getn(order) do
       local st = RXP12.active[order[oi]]
       if st then
@@ -1554,13 +1573,13 @@ function RXP12.UpdateUI()
         local sh = RenderRow(sr, st, order[oi], cur, true)
         sr:ClearAllPoints(); sr:SetPoint("TOPLEFT", RXP12StepFrame, "TOPLEFT", 6, -sy)
         sr:Show()
-        sy = sy + sh + 4
+        sy = sy + sh + 3
       end
     end
     if RXP12.stepRows then local j = k + 1; while RXP12.stepRows[j] do RXP12.stepRows[j]:Hide(); j = j + 1 end end
     if k > 0 then
-      getglobal("RXP12StepHeader"):SetText("Step "..cur.." of "..n)
-      RXP12StepFrame:SetHeight(sy + 6)
+      getglobal("RXP12StepHeader"):SetText("Step "..cur)
+      RXP12StepFrame:SetHeight(sy + 4)
       RXP12StepFrame:SetBackdropColor(0.05, 0.05, 0.07, RXP12_Save.opacity or 0.92)
       RXP12StepFrame:Show()
     else

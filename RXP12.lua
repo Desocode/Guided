@@ -1199,9 +1199,8 @@ function RXP12.UseStep()
   Print("None of this step's quest items are in your bags.")
 end
 
-local function GetRow(i)
-  if RXP12.rows[i] then return RXP12.rows[i] end
-  local r = CreateFrame("Button", "RXP12Row"..i, RXP12ScrollChild)
+local function BuildRow(parent, name)
+  local r = CreateFrame("Button", name, parent)
   r:SetWidth(ROW_WIDTH)
   r.bg = r:CreateTexture(nil, "BACKGROUND"); r.bg:SetAllPoints(); r.bg:Hide()
   r.accent = r:CreateTexture(nil, "BORDER")          -- left accent bar
@@ -1261,13 +1260,19 @@ local function GetRow(i)
     if this.tip then GameTooltip:SetOwner(this, "ANCHOR_RIGHT"); GameTooltip:SetText(this.tip, 1, 1, 1, 1, 1); GameTooltip:Show() end
   end)
   r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  return r
+end
+
+local function GetRow(i)
+  if RXP12.rows[i] then return RXP12.rows[i] end
+  local r = BuildRow(RXP12ScrollChild, "RXP12Row"..i)
   RXP12.rows[i] = r
   return r
 end
 
 -- lay out one step's row; returns its height. mode: current renders the expanded
 -- checkbox card, others render the compact line.
-local function RenderRow(r, step, i, cur)
+local function RenderRow(r, step, i, cur, expand)
   local active = RXP12.activeStickies and RXP12.activeStickies[i]
   local isCur = (i == cur)
   r.stepIndex = i
@@ -1291,7 +1296,7 @@ local function RenderRow(r, step, i, cur)
   r.numStrike:Hide(); r.fsStrike:Hide()
 
   local h
-  if isCur then
+  if expand then
     -- expanded: one checkbox row per element + objective lines + progress bar
     r.fs:Hide(); r.kindIcon:Hide()
     local y = 2
@@ -1453,6 +1458,7 @@ function RXP12.UpdateUI()
     r:ClearAllPoints(); r:SetPoint("TOPLEFT", RXP12ScrollChild, "TOPLEFT", 0, 0); r:Show()
     local idx = 2; while RXP12.rows[idx] do RXP12.rows[idx]:Hide(); idx = idx + 1 end
     RXP12ScrollChild:SetHeight(1)
+    if RXP12StepFrame then RXP12StepFrame:Hide() end
     RXP12.SetWaypoint(nil)
     return
   end
@@ -1478,7 +1484,7 @@ function RXP12.UpdateUI()
     if st.xpGate and st.xpGate.skip and RXP12.XpGateMet(st.xpGate) then
       r:Hide(); RXP12.rowY[i] = y          -- skipstep gate not applicable: hide (like a class filter)
     else
-      local h = RenderRow(r, st, i, cur)
+      local h = RenderRow(r, st, i, cur, false)
       r:ClearAllPoints()
       r:SetPoint("TOPLEFT", RXP12ScrollChild, "TOPLEFT", 0, -y)
       r:Show()
@@ -1488,6 +1494,23 @@ function RXP12.UpdateUI()
   end
   local idx = n + 1
   while RXP12.rows[idx] do RXP12.rows[idx]:Hide(); idx = idx + 1 end
+
+  -- current step shown in full detail in the linked top frame
+  if RXP12StepFrame then
+    local cs = RXP12.active[cur]
+    if cs then
+      local sh = RenderRow(RXP12.stepRow, cs, cur, cur, true)
+      RXP12.stepRow:ClearAllPoints()
+      RXP12.stepRow:SetPoint("TOPLEFT", RXP12StepFrame, "TOPLEFT", 6, -28)
+      RXP12.stepRow:Show()
+      getglobal("RXP12StepHeader"):SetText("Step "..cur.." of "..n)
+      RXP12StepFrame:SetHeight(sh + 36)
+      RXP12StepFrame:SetBackdropColor(0.05, 0.05, 0.07, RXP12_Save.opacity or 0.92)
+      RXP12StepFrame:Show()
+    else
+      RXP12StepFrame:Hide()
+    end
+  end
 
   RXP12ScrollChild:SetWidth(ROW_WIDTH)
   RXP12ScrollChild:SetHeight(y > 0 and y or 1)
@@ -1744,6 +1767,24 @@ local function CreateUI()
   sf:SetScrollChild(cchild)
   sf:EnableMouseWheel(true)
   sf:SetScript("OnMouseWheel", function() RXP12.WheelScroll(arg1) end)
+
+  -- linked top frame: the current step in full detail (sits above the list)
+  local sfr = CreateFrame("Frame", "RXP12StepFrame", f)
+  sfr:SetPoint("BOTTOMLEFT", f, "TOPLEFT", 0, 6)
+  sfr:SetPoint("BOTTOMRIGHT", f, "TOPRIGHT", 0, 6)
+  sfr:SetHeight(60)
+  sfr:SetBackdrop({
+    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile = true, tileSize = 16, edgeSize = 16,
+    insets = { left = 4, right = 4, top = 4, bottom = 4 } })
+  sfr:SetBackdropColor(0.05, 0.05, 0.07, RXP12_Save.opacity or 0.92)
+  local shdr = sfr:CreateFontString("RXP12StepHeader", "OVERLAY", "GameFontNormal")
+  shdr:SetPoint("TOPLEFT", sfr, "TOPLEFT", 12, -9)
+  shdr:SetText("Current Step")
+  RXP12.stepRow = BuildRow(sfr, "RXP12StepRow")
+  RXP12.stepRow:SetPoint("TOPLEFT", sfr, "TOPLEFT", 6, -28)
+  sfr:Hide()
 
   local close = CreateFrame("Button", "RXP12FrameClose", f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)

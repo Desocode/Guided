@@ -1217,10 +1217,25 @@ end
 local function StickyShouldPin(idx, log)
   if Guided.StepDoneByIndex(idx, log) then return false end
   local s = Guided.active and Guided.active[idx]
-  if s and s.completewith and s.completewith ~= true then
+  if not s then return false end
+  if s.completewith and s.completewith ~= true then
     local t = (s.completewith == "next") and (idx + 1)
               or (Guided.labelIndex and Guided.labelIndex[s.completewith])
     if t and (Guided_Save.step or 1) > t then return false end   -- past its completion window
+  end
+  -- a kill/collect sticky for a quest you're no longer on (abandoned) can't progress,
+  -- so don't keep it pinned. (Unknown quest id -> fail open and keep it.)
+  if log and s.quests then
+    local hasComplete, onAny = false, false
+    for k = 1, table.getn(s.quests) do
+      local q = s.quests[k]
+      if q.action == "complete" then
+        hasComplete = true
+        local nm = QuestName(q.id)
+        if (not nm) or log[lc(nm)] then onAny = true end
+      end
+    end
+    if hasComplete and not onAny then return false end
   end
   return true
 end

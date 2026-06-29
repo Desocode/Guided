@@ -144,7 +144,8 @@ function RXP12.BuildActive()
     local st = g.steps[i]
     if st.dungeon and not seenD[st.dungeon] then seenD[st.dungeon] = true; tinsert(RXP12.dungeonCodes, st.dungeon) end
     if st.dungeonskip and not seenD[st.dungeonskip] then seenD[st.dungeonskip] = true; tinsert(RXP12.dungeonCodes, st.dungeonskip) end
-    if RXP12.EvalCondition(st.cond) and RXP12.DungeonCheck(st) then
+    if RXP12.EvalCondition(st.cond) and RXP12.DungeonCheck(st)
+        and (not st.maxlevel or UnitLevel("player") <= st.maxlevel) then
       tinsert(RXP12.active, st)
       local s = RXP12.active[table.getn(RXP12.active)]
       if s.label and s.label ~= true then RXP12.labelIndex[s.label] = table.getn(RXP12.active) end
@@ -240,6 +241,9 @@ function RXP12.ParseLine(step, t)
           elseif string.sub(code, 1, 1) == "!" then step.dungeonskip = string.upper(string.sub(code, 2))
           else step.dungeon = string.upper(code) end
         end
+      elseif cmd == "maxlevel" then
+        local _, _, ml = string.find(rest, "(%d+)")
+        if ml then step.maxlevel = tonumber(ml) end       -- hide once you outlevel it
       elseif disp then kind = "note"; etext = disp        -- any other command, show its text only
       end
     elseif first == "#" then
@@ -285,6 +289,7 @@ function RXP12.Parse(text, headerOnly)
         local _, _, cond = string.find(t, "^step%s*<<%s*(.*)")
         if cond and cond ~= "" then step.cond = cond end
         tinsert(guide.steps, step)
+        step.gindex = table.getn(guide.steps)   -- stable id for persisted completion
       elseif not step then
         -- header directives (before the first step)
         local _, _, key, val = string.find(t, "^#(%S+)%s*(.*)")
@@ -562,11 +567,26 @@ end
 -- the following step is done) and "#completewith <label>" (done when the labelled
 -- step is done) by delegating; depth-guarded against cycles. Falls back to the
 -- step's own completion otherwise.
+-- persisted completion: once a step is AUTO-detected done, remember it per guide so
+-- it stays skipped after /reload (covers turn-ins the quest log no longer shows).
+-- Only SkipForward records these -- never a manual jump.
+function RXP12.IsDoneStored(s)
+  if not s or not s.gindex or not RXP12_Save.guide then return false end
+  local d = RXP12_Save.done and RXP12_Save.done[RXP12_Save.guide]
+  return (d and d[s.gindex]) and true or false
+end
+function RXP12.RecordDone(s)
+  if not s or not s.gindex or not RXP12_Save.guide then return end
+  RXP12_Save.done[RXP12_Save.guide] = RXP12_Save.done[RXP12_Save.guide] or {}
+  RXP12_Save.done[RXP12_Save.guide][s.gindex] = true
+end
+
 function RXP12.StepDoneByIndex(i, log, depth)
   depth = (depth or 0) + 1
   if depth > 30 then return false end
   local s = RXP12.active and RXP12.active[i]
   if not s then return false end
+  if RXP12.IsDoneStored(s) then return true end
   if s.completewith and s.completewith ~= true then
     local target
     if s.completewith == "next" then target = i + 1
@@ -601,9 +621,10 @@ function RXP12.SkipForward()
     local s = RXP12.active[i]
     if s and s.sticky then
       -- pin it (unless already satisfied) and step over it
-      if not RXP12.StepDoneByIndex(i, log) then RXP12.activeStickies[i] = true end
+      if RXP12.StepDoneByIndex(i, log) then RXP12.RecordDone(s) else RXP12.activeStickies[i] = true end
       RXP12_Save.step = i + 1
     elseif RXP12.StepDoneByIndex(i, log) then
+      RXP12.RecordDone(s)                 -- auto-completed -> remember across reloads
       RXP12_Save.step = i + 1
     else
       break
@@ -1687,6 +1708,7 @@ local function Defaults()
   if RXP12_Save.scale == nil then RXP12_Save.scale = 1 end
   if RXP12_Save.opacity == nil then RXP12_Save.opacity = 0.92 end
   if RXP12_Save.dungeons == nil then RXP12_Save.dungeons = {} end
+  if RXP12_Save.done == nil then RXP12_Save.done = {} end   -- per-guide [gindex]=true (auto-completed)
 end
 
 -- score a guide for "is this the right one to start me on?" given the player level.
@@ -1765,6 +1787,7 @@ local function OnEvent()
       .."|r  (/rxp12 list · /rxp12 detect · /rxp12 options)")
   elseif event == "QUEST_LOG_UPDATE" or event == "UNIT_QUEST_LOG_CHANGED"
       or event == "PLAYER_LEVEL_UP" then
+    if event == "PLAYER_LEVEL_UP" then RXP12.BuildActive() end   -- re-filter maxlevel/level steps
     RXP12.CheckAuto()
     RXP12.UpdateUI()
   elseif event == "QUEST_DETAIL" or event == "QUEST_PROGRESS"
@@ -1808,7 +1831,7 @@ SlashCmdList["RXP12"] = function(msg)
     else
       Print("No guide matched your class/race/level.")
     end
-  elseif cmd == "reset" then RXP12.seen = {}; RXP12.activeStickies = {}; RXP12.SetStep(1); Print("Reset to step 1.")
+  elseif cmd == "reset" then RXP12.seen = {}; RXP12.activeStickies = {}; if RXP12_Save.done then RXP12_Save.done[RXP12_Save.guide] = nil end; RXP12.SetStep(1); Print("Reset to step 1.")
   elseif cmd == "list" then
     Print("Guides ("..table.getn(RXP12.guideOrder).."):")
     for i = 1, table.getn(RXP12.guideOrder) do

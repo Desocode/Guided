@@ -1728,7 +1728,7 @@ end
 local function CreateOptions()
   if RXP12OptionsFrame then return end
   local f = CreateFrame("Frame", "RXP12OptionsFrame", UIParent)
-  f:SetWidth(290); f:SetHeight(300)
+  f:SetWidth(300); f:SetHeight(322)
   f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
   f:SetBackdrop({
     bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -1750,21 +1750,25 @@ local function CreateOptions()
     function(v) RXP12_Save.auto = v
       Print("Auto quest pickup/turn-in "..(v and "|cff66cc66ON|r" or "|cffff5555OFF|r")) end)
 
-  MakeCheck(f, "RXP12OptArrow", "Show direction arrow", -64,
+  MakeCheck(f, "RXP12OptArrow", "Show direction arrow", -60,
     function() return RXP12_Save.arrow end,
     function(v) RXP12_Save.arrow = v end)
 
-  MakeCheck(f, "RXP12OptLock", "Lock guide window", -92,
+  MakeCheck(f, "RXP12OptLock", "Lock guide window", -84,
     function() return RXP12_Save.locked end,
     function(v) RXP12_Save.locked = v end)
 
-  MakeCheck(f, "RXP12OptMinimap", "Show minimap button", -120,
+  MakeCheck(f, "RXP12OptMinimap", "Show minimap button", -108,
     function() return RXP12_Save.minimap ~= false end,
     function(v) RXP12_Save.minimap = v; RXP12.UpdateMinimapButton() end)
 
+  MakeCheck(f, "RXP12OptTracker", "Leveling tracker", -132,
+    function() return RXP12_Save.tracker end,
+    function(v) RXP12_Save.tracker = v; RXP12.ApplyTracker() end)
+
   local s = CreateFrame("Slider", "RXP12OptScale", f, "OptionsSliderTemplate")
   s:SetWidth(220); s:SetHeight(16)
-  s:SetPoint("TOP", f, "TOP", 0, -150)
+  s:SetPoint("TOP", f, "TOP", 0, -172)
   s:SetMinMaxValues(0.7, 1.5)
   s:SetValueStep(0.05)
   getglobal("RXP12OptScaleLow"):SetText("0.7")
@@ -1779,7 +1783,7 @@ local function CreateOptions()
 
   local op = CreateFrame("Slider", "RXP12OptOpacity", f, "OptionsSliderTemplate")
   op:SetWidth(220); op:SetHeight(16)
-  op:SetPoint("TOP", f, "TOP", 0, -196)
+  op:SetPoint("TOP", f, "TOP", 0, -210)
   op:SetMinMaxValues(0, 1)
   op:SetValueStep(0.05)
   getglobal("RXP12OptOpacityLow"):SetText("0")
@@ -1792,14 +1796,36 @@ local function CreateOptions()
     if RXP12Frame then RXP12Frame:SetBackdropColor(0.05, 0.05, 0.07, v) end
   end)
 
+  -- guide/feature buttons (two rows)
+  local dng = CreateFrame("Button", "RXP12OptDungeons", f, "UIPanelButtonTemplate")
+  dng:SetWidth(128); dng:SetHeight(22); dng:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -238)
+  dng:SetText("Dungeons...")
+  dng:SetScript("OnClick", function() RXP12.ShowDungeons() end)
+
+  local det = CreateFrame("Button", "RXP12OptDetect", f, "UIPanelButtonTemplate")
+  det:SetWidth(128); det:SetHeight(22); det:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -238)
+  det:SetText("Auto-detect guide")
+  det:SetScript("OnClick", function()
+    local b = RXP12.AutoSelectGuide(); if b then RXP12.LoadGuideByName(b) end
+  end)
+
+  local imp = CreateFrame("Button", "RXP12OptImport", f, "UIPanelButtonTemplate")
+  imp:SetWidth(128); imp:SetHeight(22); imp:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -264)
+  imp:SetText("Import guide...")
+  imp:SetScript("OnClick", function() RXP12.ShowImport() end)
+
   local rst = CreateFrame("Button", "RXP12OptReset", f, "UIPanelButtonTemplate")
-  rst:SetWidth(130); rst:SetHeight(22)
-  rst:SetPoint("BOTTOM", f, "BOTTOM", 0, 14)
+  rst:SetWidth(128); rst:SetHeight(22); rst:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -264)
   rst:SetText("Reset progress")
   rst:SetScript("OnClick", function()
-    RXP12.seen = {}; RXP12.activeStickies = {}; RXP12.SetStep(1)
-    Print("Reset to step 1.")
+    RXP12.seen = {}; RXP12.activeStickies = {}
+    if RXP12_Save.done then RXP12_Save.done[RXP12_Save.guide] = nil end
+    RXP12.SetStep(1); Print("Reset to step 1.")
   end)
+
+  local note = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  note:SetPoint("BOTTOM", f, "BOTTOM", 0, 8)
+  note:SetText("Professions are handled automatically by skill level.")
 
   local close = CreateFrame("Button", "RXP12OptionsClose", f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
@@ -1819,6 +1845,7 @@ function RXP12.ToggleOptions()
     if RXP12OptMinimap then RXP12OptMinimap:SetChecked(RXP12_Save.minimap ~= false) end
     if RXP12OptScale then RXP12OptScale:SetValue(RXP12_Save.scale or 1) end
     if RXP12OptOpacity then RXP12OptOpacity:SetValue(RXP12_Save.opacity or 0.92) end
+    if RXP12OptTracker then RXP12OptTracker:SetChecked(RXP12_Save.tracker == true) end
     RXP12OptionsFrame:Show()
   end
 end

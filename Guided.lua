@@ -1072,15 +1072,29 @@ end
 -- on: when reached they're pinned (shown alongside the current step) until their
 -- own condition is met, and we move on to the next non-sticky step. Stops at the
 -- first step that isn't done/sticky, or the last step.
+-- a pinned sticky should drop once it's done OR the current step has advanced past
+-- the step it completes with (its window closed). Without this an orphaned side-step
+-- lingers while you're already several steps ahead (e.g. after abandoning a quest).
+local function StickyShouldPin(idx, log)
+  if Guided.StepDoneByIndex(idx, log) then return false end
+  local s = Guided.active and Guided.active[idx]
+  if s and s.completewith and s.completewith ~= true then
+    local t = (s.completewith == "next") and (idx + 1)
+              or (Guided.labelIndex and Guided.labelIndex[s.completewith])
+    if t and (Guided_Save.step or 1) > t then return false end   -- past its completion window
+  end
+  return true
+end
+
 function Guided.SkipForward()
   if not Guided.active then return end
   Guided.activeStickies = Guided.activeStickies or {}
   local log = BuildQuestLog()   -- also records "seen" titles
   local n = table.getn(Guided.active)
 
-  -- unpin any sticky whose condition has since been satisfied
+  -- unpin any sticky that's done or whose completion window has passed
   for idx in pairs(Guided.activeStickies) do
-    if Guided.StepDoneByIndex(idx, log) then Guided.activeStickies[idx] = nil end
+    if not StickyShouldPin(idx, log) then Guided.activeStickies[idx] = nil end
   end
 
   -- (re)pin sticky side-steps behind the current step that are still relevant.
@@ -1089,7 +1103,7 @@ function Guided.SkipForward()
   local cur0 = Guided_Save.step or 1
   for i = 1, cur0 - 1 do
     local sp = Guided.active[i]
-    if sp and sp.sticky and not Guided.StepDoneByIndex(i, log) then
+    if sp and sp.sticky and StickyShouldPin(i, log) then
       Guided.activeStickies[i] = true
     end
   end
@@ -2872,6 +2886,33 @@ ev:SetScript("OnEvent", function()
   local ok, err = pcall(OnEvent)
   if not ok then Print("|cffff4040error:|r "..tostring(err)) end
 end)
+
+-- Abandoning a quest is "seen -> gone" just like a turn-in, so the completion
+-- tracker would wrongly mark it done. Hook the abandon flow to forget the quest
+-- (clear it from seen + doneQuests) and route back to the step that accepts it.
+local origAbandonQuest = AbandonQuest
+function AbandonQuest(...)
+  local nm = GetAbandonQuestName and GetAbandonQuestName()
+  if nm and nm ~= "" and Guided.active then
+    local key = lc(nm)
+    Guided.seen[key] = nil                                   -- so the vanish isn't a "hand-in"
+    if Guided_Save.doneQuests then
+      for id in pairs(Guided_Save.doneQuests) do
+        if lc(QuestName(id) or "") == key then Guided_Save.doneQuests[id] = nil end
+      end
+    end
+    for i = 1, table.getn(Guided.active) do                  -- jump back to where you accept it
+      local qs = Guided.active[i].quests
+      for k = 1, table.getn(qs or {}) do
+        if qs[k].action == "accept" and lc(QuestName(qs[k].id) or "") == key then
+          if i < (Guided_Save.step or 1) then Guided_Save.step = i end
+          break
+        end
+      end
+    end
+  end
+  return origAbandonQuest(...)   -- QUEST_LOG_UPDATE then re-runs SkipForward with the quest gone
+end
 
 -- ----------------------------------------------------------------- slash ----
 SLASH_GUIDED1 = "/guided"

@@ -247,7 +247,14 @@ function RXP12.ParseLine(step, t)
         if ml then step.maxlevel = tonumber(ml) end       -- hide once you outlevel it
       elseif cmd == "use" then
         local _, _, id = string.find(rest, "(%d+)")
-        if id and not step.useitem then step.useitem = tonumber(id) end   -- quest item to use
+        id = tonumber(id)
+        if id then
+          step.useitems = step.useitems or {}
+          local dup = false
+          for k = 1, table.getn(step.useitems) do if step.useitems[k] == id then dup = true; break end end
+          if not dup then tinsert(step.useitems, id) end
+          step.useitem = step.useitem or id
+        end
       elseif cmd == "target" or cmd == "mob" then
         local nm = rest
         nm = string.gsub(nm, '"', "")          -- RXP uses quotes for partial match
@@ -943,19 +950,38 @@ end
 
 -- use a quest item by id: find it in the bags (its link carries item:<id>:) and
 -- use it. No item-name DB needed; works in combat (1.12 has no secure restrictions).
-function RXP12.UseItemById(id)
+function RXP12.FindItem(id)
   if not id then return end
   for bag = 0, 4 do
     local slots = GetContainerNumSlots(bag) or 0
     for slot = 1, slots do
       local link = GetContainerItemLink(bag, slot)
-      if link and string.find(link, "item:"..id..":", 1, true) then
-        UseContainerItem(bag, slot); return true
-      end
+      if link and string.find(link, "item:"..id..":", 1, true) then return bag, slot end
     end
   end
+end
+
+function RXP12.UseItemById(id)
+  local bag, slot = RXP12.FindItem(id)
+  if bag then UseContainerItem(bag, slot); return true end
   Print("That quest item isn't in your bags.")
   return false
+end
+
+-- use the current step's quest items: the next one actually in your bags (cycles
+-- if several are present). Bind via a macro: /rxp12 use
+function RXP12.UseStep()
+  local step = RXP12.CurrentStep()
+  local items = step and step.useitems
+  if not items or table.getn(items) == 0 then return end
+  local n = table.getn(items)
+  local start = RXP12.useIdx or 0
+  for k = 1, n do
+    local idx = mymod(start + k - 1, n) + 1
+    local bag, slot = RXP12.FindItem(items[idx])
+    if bag then RXP12.useIdx = idx; UseContainerItem(bag, slot); return end
+  end
+  Print("None of this step's quest items are in your bags.")
 end
 
 local function GetRow(i)
@@ -1004,7 +1030,7 @@ local function GetRow(i)
   r.targetBtn:SetScript("OnClick", function() RXP12.TargetStep() end)
   r.useBtn = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
   r.useBtn:SetHeight(18); r.useBtn:SetWidth(120); r.useBtn:SetText("Use quest item"); r.useBtn:Hide()
-  r.useBtn:SetScript("OnClick", function() if this.uid then RXP12.UseItemById(this.uid) end end)
+  r.useBtn:SetScript("OnClick", function() RXP12.UseStep() end)
   r:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
   local hl = r:GetHighlightTexture(); if hl then hl:SetVertexColor(1, 1, 1, 0.08) end
   -- left-click does nothing; RIGHT-click opens the menu (with a "Go to step" option)
@@ -1119,8 +1145,10 @@ local function RenderRow(r, step, i, cur)
       r.targetBtn:ClearAllPoints(); r.targetBtn:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
       r.targetBtn:Show(); y = y + 22
     else r.targetBtn:Hide() end
-    if step.useitem then
-      r.useBtn.uid = step.useitem
+    if step.useitems and table.getn(step.useitems) > 0 then
+      local nu = table.getn(step.useitems)
+      r.useBtn:SetText(nu > 1 and ("Use item ("..nu..")") or "Use quest item")
+      r.useBtn:SetWidth(120)
       r.useBtn:ClearAllPoints(); r.useBtn:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
       r.useBtn:Show(); y = y + 22
     else r.useBtn:Hide() end
@@ -1896,6 +1924,7 @@ SlashCmdList["RXP12"] = function(msg)
   if cmd == "next" then RXP12.Advance()
   elseif cmd == "prev" or cmd == "back" then RXP12.Back()
   elseif cmd == "target" then RXP12.TargetStep()
+  elseif cmd == "use" then RXP12.UseStep()
   elseif cmd == "options" or cmd == "config" or cmd == "opt" then RXP12.ToggleOptions()
   elseif cmd == "dungeons" then RXP12.ShowDungeons()
   elseif cmd == "import" then

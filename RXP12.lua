@@ -977,9 +977,10 @@ local function GetElemRow(r, j)
   r.elems = r.elems or {}
   if r.elems[j] then return r.elems[j] end
   local er = CreateFrame("Button", nil, r)
-  er.check = CreateFrame("CheckButton", nil, er, "UICheckButtonTemplate")
-  er.check:SetWidth(18); er.check:SetHeight(18)
-  er.check:SetPoint("TOPLEFT", er, "TOPLEFT", 0, 0)
+  er.check = CreateFrame("CheckButton", nil, er, "UIRadioButtonTemplate")
+  er.check:SetWidth(16); er.check:SetHeight(16)
+  er.check:SetPoint("TOPLEFT", er, "TOPLEFT", 1, -1)
+  local ck = er.check:GetCheckedTexture(); if ck then ck:SetVertexColor(0.3, 1, 0.3) end  -- green dot
   er.icon = er:CreateTexture(nil, "OVERLAY")
   er.icon:SetWidth(13); er.icon:SetHeight(13)
   er.icon:SetPoint("TOPLEFT", er, "TOPLEFT", 21, -2)

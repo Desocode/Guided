@@ -214,7 +214,7 @@ function RXP12.ParseLine(step, t)
   if disp == "" then disp = nil end
   if disp then tinsert(step.text, Sanitize(disp)) end
 
-  local kind, etext, eid, eobj, eauto = nil, disp, nil, nil, nil
+  local kind, etext, eid, eobj, eauto, eautogoto = nil, disp, nil, nil, nil, nil
 
   if pre == "" then
     if disp then kind = "note" end                       -- a plain ">>text" note
@@ -224,19 +224,23 @@ function RXP12.ParseLine(step, t)
       local _, _, cmd, rest = string.find(pre, "^%.(%S+)%s*(.*)")
       if cmd == "goto" then
         tinsert(step.gotos, rest)
-        kind = "goto"; etext = disp or FormatGoto(rest)
+        kind = "goto"
+        if disp then etext = disp                          -- author's destination text
+        else etext = FormatGoto(rest); eautogoto = true end -- else navigation-only (arrow drives it)
       elseif cmd == "accept" or cmd == "complete" or cmd == "turnin" then
         -- RXP form: ".accept <id>", ".turnin <id>", ".complete <id>,<objective>"
         local _, _, id, obj = string.find(rest, "(%d+),?(%d*)")
         eid = tonumber(id); eobj = tonumber(obj)
         local _, _, tnum = string.find(rest, "%(x?(%d+)%)")    -- target count from "(x7)"
-        tinsert(step.quests, { action = cmd, id = eid, obj = eobj, cond = lineCond, target = tonumber(tnum) })
+        local _, _, cmt = string.find(rest, "%-%-%s*(.+)")
+        local label = cmt and trim(string.gsub(cmt, "%s*%b()%s*$", "")) or nil  -- comment minus "(x7)"
+        tinsert(step.quests, { action = cmd, id = eid, obj = eobj, cond = lineCond,
+          target = tonumber(tnum), label = label })
         kind = cmd
         if not etext then
-          if cmd == "complete" then eauto = true end           -- comment-only objective: fold onto the note
-          local _, _, cmt = string.find(rest, "%-%-%s*(.+)")
           if cmt and trim(cmt) ~= "" then
             etext = trim(cmt)
+            if cmd == "complete" then eauto = true end          -- has a label -> fold into the note
           else
             local nm = QuestName(eid)
             local verb = (cmd == "accept" and "Accept") or (cmd == "turnin" and "Turn in") or "Complete"
@@ -310,7 +314,7 @@ function RXP12.ParseLine(step, t)
   end
 
   if kind and etext and etext ~= "" then
-    tinsert(step.elements, { kind = kind, text = Sanitize(etext), id = eid, obj = eobj, cond = lineCond, auto = eauto })
+    tinsert(step.elements, { kind = kind, text = Sanitize(etext), id = eid, obj = eobj, cond = lineCond, auto = eauto, autogoto = eautogoto })
   end
 end
 
@@ -942,6 +946,18 @@ local function StepHasNote(step)
   return false
 end
 
+-- does the step have any visible non-goto line? (used to drop the auto "Go to
+-- <zone>" line when the author's notes/actions already describe the destination)
+local function StepHasText(step)
+  for j = 1, table.getn(step.elements or {}) do
+    local el = step.elements[j]
+    if el.kind and el.kind ~= "goto" and el.text and el.text ~= "" and CondOK(el.cond) then
+      return true
+    end
+  end
+  return false
+end
+
 -- combined counts for a step's .complete objectives: live "3/7, 1/4" when the
 -- quest is in the log, else the target totals. Returned colored, or nil.
 local function StepCounts(step, live)
@@ -958,6 +974,33 @@ local function StepCounts(step, live)
   end
   if table.getn(parts) == 0 then return nil end
   return "|cffffe080"..table.concat(parts, ", ").."|r"
+end
+
+-- build "Kill <mob> (3/7) and <mob> (1/4)" from .complete objective labels + counts
+-- (live when in the log, else target totals). nil if no labelled objectives.
+local function StepKillLine(step, live)
+  local q = step.quests; if not q then return nil end
+  local items = {}
+  for k = 1, table.getn(q) do
+    local it = q[k]
+    if it.action == "complete" and it.obj and it.label and CondOK(it.cond) then
+      local cnt
+      if live then cnt = ObjectiveCount(it.id, it.obj) end
+      if not cnt and it.target then cnt = tostring(it.target) end
+      tinsert(items, { label = it.label, cnt = cnt })
+    end
+  end
+  if table.getn(items) == 0 then return nil end
+  local _, _, verb = string.find(items[1].label, "^(%a+)")
+  local parts = {}
+  for i = 1, table.getn(items) do
+    local mob = items[i].label
+    if verb then mob = string.gsub(mob, "^"..verb.."%s+", "") end   -- strip the shared verb
+    local seg = "|cffff8080"..mob.."|r"
+    if items[i].cnt then seg = seg.." |cffffe080("..items[i].cnt..")|r" end
+    tinsert(parts, seg)
+  end
+  return (verb and (verb.." ") or "")..table.concat(parts, " and ")
 end
 
 local function ObjectiveProgress(step)
@@ -1002,9 +1045,10 @@ local function GetElemRow(r, j)
   if r.elems[j] then return r.elems[j] end
   local er = CreateFrame("Button", nil, r)
   er.check = CreateFrame("CheckButton", nil, er, "UIRadioButtonTemplate")
-  er.check:SetWidth(16); er.check:SetHeight(16)
+  er.check:SetWidth(18); er.check:SetHeight(18)
   er.check:SetPoint("TOPLEFT", er, "TOPLEFT", 1, -1)
-  local ck = er.check:GetCheckedTexture(); if ck then ck:SetVertexColor(0.3, 1, 0.3) end  -- green dot
+  local rn = er.check:GetNormalTexture(); if rn then rn:SetVertexColor(1, 1, 1, 0.35) end   -- de-grey the ring
+  local ck = er.check:GetCheckedTexture(); if ck then ck:SetVertexColor(0.3, 1, 0.3) end    -- green dot
   er.icon = er:CreateTexture(nil, "OVERLAY")
   er.icon:SetWidth(13); er.icon:SetHeight(13)
   er.icon:SetPoint("TOPLEFT", er, "TOPLEFT", 21, -2)
@@ -1163,11 +1207,12 @@ local function RenderRow(r, step, i, cur)
     local els = step.elements or {}
     local nEls = table.getn(els)
     local hasNote = StepHasNote(step)
-    local summary = hasNote and StepCounts(step, true) or nil
+    local hasText = StepHasText(step)
+    local killLine = hasNote and StepKillLine(step, true) or nil
     local vis = 0
     for j = 1, nEls do
       local el = els[j]
-      if CondOK(el.cond) and not (el.auto and hasNote) then   -- skip folded completes
+      if CondOK(el.cond) and not (el.auto and hasNote) and not (el.autogoto and hasText) then   -- skip folded/navigation lines
         vis = vis + 1
         local er = GetElemRow(r, vis)
         er.element = el
@@ -1179,7 +1224,7 @@ local function RenderRow(r, step, i, cur)
         if ip then er.icon:SetTexture(ip); er.icon:Show(); fx = 37 else er.icon:Hide() end
         er.fs:ClearAllPoints(); er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", fx, -2); er.fs:SetWidth(CONTENT_W - fx)
         local txt = ElementLineWithCount(el)
-        if el.kind == "note" and summary then txt = txt.."  "..summary; summary = nil end
+        if el.kind == "note" and killLine then txt = killLine; killLine = nil end
         er.fs:SetText(txt)
         er.check:SetChecked(el.checked and true or false)
         local eh = FSHeight(er.fs); if eh < 18 then eh = 18 end
@@ -1212,7 +1257,7 @@ local function RenderRow(r, step, i, cur)
       local n = 0
       for k = 1, table.getn(step.elements or {}) do
         local el = step.elements[k]
-        if CondOK(el.cond) and not (el.auto and hasNote) then
+        if CondOK(el.cond) and not (el.auto and hasNote) and not (el.autogoto and hasText) then
           n = n + 1
           if not el.checked then return end
         end
@@ -1253,14 +1298,15 @@ local function RenderRow(r, step, i, cur)
       r.kindIcon:Hide()
     end
     local hasNote = StepHasNote(step)
-    local summary = hasNote and StepCounts(step, active) or nil
+    local hasText = StepHasText(step)
+    local killLine = hasNote and StepKillLine(step, active) or nil
     local lines = {}
     local injected = false
     for j = 1, table.getn(step.elements or {}) do
       local el = step.elements[j]
-      if CondOK(el.cond) and not (el.auto and hasNote) then
+      if CondOK(el.cond) and not (el.auto and hasNote) and not (el.autogoto and hasText) then
         local line = active and ElementLineWithCount(el) or ElementLine(el)
-        if el.kind == "note" and not injected and summary then line = line.."  "..summary; injected = true end
+        if el.kind == "note" and not injected and killLine then line = killLine; injected = true end
         tinsert(lines, line)
       end
     end

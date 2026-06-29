@@ -1006,6 +1006,27 @@ end
 
 -- overall objective progress for a step (done, total) read from the quest log
 -- live "x/y" count + done flag for a single quest objective (for inline display).
+-- the quest log's objective leaderboard text + done flag, e.g.
+-- "Young Nightsaber slain: 3/7". nil if the quest isn't in the log.
+local function ObjectiveText(qid, obj)
+  local nm = QuestName(qid); if not nm or not obj then return nil end
+  nm = lc(nm)
+  local sel = GetQuestLogSelection()
+  local total = GetNumQuestLogEntries()
+  local txt, done
+  for i = 1, total do
+    local title, _, _, isHeader = GetQuestLogTitle(i)
+    if title and not isHeader and lc(title) == nm then
+      SelectQuestLogEntry(i)
+      local t, _, d = GetQuestLogLeaderBoard(obj)
+      txt = t; done = d
+      break
+    end
+  end
+  if sel then SelectQuestLogEntry(sel) end
+  return txt, done
+end
+
 local function ObjectiveCount(qid, obj)
   local nm = QuestName(qid); if not nm then return nil, nil end
   nm = lc(nm)
@@ -1310,24 +1331,37 @@ local function RenderRow(r, step, i, cur, expand)
     local y = 2
     local els = step.elements or {}
     local nEls = table.getn(els)
-    local hasNote = StepHasNote(step)
-    local killLine = hasNote and StepKillLine(step, true) or nil
     local vis = 0
     for j = 1, nEls do
       local el = els[j]
-      if CondOK(el.cond) and not (el.auto and hasNote) then   -- skip folded completes
+      if CondOK(el.cond) then
         vis = vis + 1
         local er = GetElemRow(r, vis)
         er.element = el
         er.tip = el.text
-        er.check:Show()
-        er:SetScript("OnClick", er._onclick)
+        local radio = (el.kind ~= "note" and el.kind ~= "level")    -- objectives/actions track; notes are text
+        local txt
+        if el.kind == "complete" and el.id and el.obj then
+          local ot, od = ObjectiveText(el.id, el.obj)                -- "Young Nightsaber slain: 0/5"
+          txt = ot or ElementLineWithCount(el)
+          if od ~= nil then el.checked = od and true or false end     -- radio auto-tracks the kill
+        else
+          txt = ElementLine(el)
+        end
         local ip = KIND_ICON[el.kind]
-        local fx = 22
-        if ip then er.icon:SetTexture(ip); er.icon:Show(); fx = 37 else er.icon:Hide() end
+        local fx
+        if radio then
+          er.check:Show(); er:SetScript("OnClick", er._onclick)
+          if el.kind ~= "complete" and ip then
+            er.icon:ClearAllPoints(); er.icon:SetPoint("TOPLEFT", er, "TOPLEFT", 21, -2)
+            er.icon:SetTexture(ip); er.icon:Show(); fx = 37
+          else
+            er.icon:Hide(); fx = 22
+          end
+        else
+          er.check:Hide(); er:SetScript("OnClick", nil); er.icon:Hide(); fx = 2
+        end
         er.fs:ClearAllPoints(); er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", fx, -2); er.fs:SetWidth(CONTENT_W - fx)
-        local txt = ElementLineWithCount(el)
-        if el.kind == "note" and killLine then txt = killLine; killLine = nil end
         er.fs:SetText(txt)
         er.check:SetChecked(el.checked and true or false)
         local eh = FSHeight(er.fs); if eh < 18 then eh = 18 end
@@ -1360,7 +1394,7 @@ local function RenderRow(r, step, i, cur, expand)
       local n = 0
       for k = 1, table.getn(step.elements or {}) do
         local el = step.elements[k]
-        if CondOK(el.cond) and not (el.auto and hasNote) then
+        if CondOK(el.cond) and el.kind ~= "note" and el.kind ~= "level" then
           n = n + 1
           if not el.checked then return end
         end

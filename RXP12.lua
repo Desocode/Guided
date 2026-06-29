@@ -947,6 +947,82 @@ function RXP12.UpdateUI()
   RXP12.SetWaypoint(RXP12.active[cur])
 end
 
+-- ------------------------------------------------------ guide-select menu ----
+-- RXP-style cog menu: a native UIDropDownMenu whose top level has Options +
+-- Auto-detect, then one expandable submenu per guide #group (subcategory); the
+-- submenu lists that group's guides (current one checked). Click a guide to load.
+function RXP12.LoadGuideByName(name)
+  if not RXP12.guides[name] then return end
+  RXP12_Save.guide = name; RXP12_Save.step = 1
+  RXP12.seen = {}; RXP12.activeStickies = {}
+  RXP12.BuildActive(); RXP12.SkipForward(); RXP12.Show()
+  Print("Loaded: |cffffd200"..name.."|r")
+end
+
+function RXP12.MenuGroups()
+  local seen, order = {}, {}
+  for i = 1, table.getn(RXP12.guideOrder) do
+    local grp = (RXP12.guides[RXP12.guideOrder[i]].group) or "Other"
+    if not seen[grp] then seen[grp] = true; tinsert(order, grp) end
+  end
+  return order
+end
+
+function RXP12.GuidesInGroup(grp)
+  local out = {}
+  for i = 1, table.getn(RXP12.guideOrder) do
+    local gname = RXP12.guideOrder[i]
+    if ((RXP12.guides[gname].group) or "Other") == grp then tinsert(out, gname) end
+  end
+  return out
+end
+
+function RXP12.MenuInit()
+  local level = UIDROPDOWNMENU_MENU_LEVEL or 1
+  local info
+  if level == 1 then
+    info = {}; info.text = "RXP12"; info.isTitle = 1; info.notCheckable = 1
+    UIDropDownMenu_AddButton(info, 1)
+
+    info = {}; info.text = "Options..."; info.notCheckable = 1
+    info.func = function() RXP12.ToggleOptions(); CloseDropDownMenus() end
+    UIDropDownMenu_AddButton(info, 1)
+
+    info = {}; info.text = "Auto-detect my guide"; info.notCheckable = 1
+    info.func = function()
+      local best = RXP12.AutoSelectGuide()
+      if best then RXP12.LoadGuideByName(best) end
+      CloseDropDownMenus()
+    end
+    UIDropDownMenu_AddButton(info, 1)
+
+    info = {}; info.text = "Guides"; info.isTitle = 1; info.notCheckable = 1
+    UIDropDownMenu_AddButton(info, 1)
+
+    local groups = RXP12.MenuGroups()
+    for gi = 1, table.getn(groups) do
+      info = {}; info.text = groups[gi]; info.notCheckable = 1
+      info.hasArrow = 1; info.value = groups[gi]
+      UIDropDownMenu_AddButton(info, 1)
+    end
+  elseif level == 2 then
+    local names = RXP12.GuidesInGroup(UIDROPDOWNMENU_MENU_VALUE)
+    for ni = 1, table.getn(names) do
+      local gname = names[ni]
+      info = {}
+      info.text = gname
+      info.checked = (RXP12_Save.guide == gname)
+      info.func = function() RXP12.LoadGuideByName(gname); CloseDropDownMenus() end
+      UIDropDownMenu_AddButton(info, 2)
+    end
+  end
+end
+
+function RXP12.ToggleMenu()
+  if not RXP12Menu then return end
+  ToggleDropDownMenu(1, nil, RXP12Menu, "RXP12FrameCog", 0, 0)
+end
+
 local function CreateUI()
   if RXP12Frame then return end
   local f = CreateFrame("Frame", "RXP12Frame", UIParent)
@@ -969,12 +1045,27 @@ local function CreateUI()
     RXP12_Save.pos = { x = this:GetLeft(), y = this:GetTop() }
   end)
 
-  -- header: class icon + guide name + counter, with a divider line
+  -- header: cog menu + class icon + guide name + counter, with a divider line
+  local cog = CreateFrame("Button", "RXP12FrameCog", f)
+  cog:SetWidth(18); cog:SetHeight(18)
+  cog:SetPoint("TOPLEFT", f, "TOPLEFT", 8, -7)
+  cog:SetNormalTexture("Interface\\Icons\\INV_Misc_Gear_01")
+  cog:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+  cog:SetScript("OnClick", function() RXP12.ToggleMenu() end)
+  cog:SetScript("OnEnter", function()
+    GameTooltip:SetOwner(this, "ANCHOR_RIGHT"); GameTooltip:SetText("Guides & Options", 1, 1, 1); GameTooltip:Show()
+  end)
+  cog:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
   local cicon = f:CreateTexture("RXP12FrameClassIcon", "OVERLAY")
   cicon:SetWidth(18); cicon:SetHeight(18)
-  cicon:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -8)
+  cicon:SetPoint("LEFT", cog, "RIGHT", 5, 0)
   cicon:SetTexture("Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes")
   cicon:Hide()
+
+  -- hidden dropdown that backs the cog menu
+  local menu = CreateFrame("Frame", "RXP12Menu", UIParent, "UIDropDownMenuTemplate")
+  UIDropDownMenu_Initialize(menu, RXP12.MenuInit, "MENU")
 
   local title = f:CreateFontString("RXP12FrameTitle", "OVERLAY", "GameFontNormal")
   title:SetPoint("LEFT", cicon, "RIGHT", 6, 0)
@@ -1009,12 +1100,6 @@ local function CreateUI()
   next:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 8)
   next:SetText("Next >")
   next:SetScript("OnClick", function() RXP12.Advance() end)
-
-  local opt = CreateFrame("Button", "RXP12FrameOpt", f, "UIPanelButtonTemplate")
-  opt:SetWidth(70); opt:SetHeight(20)
-  opt:SetPoint("BOTTOM", f, "BOTTOM", 0, 8)
-  opt:SetText("Options")
-  opt:SetScript("OnClick", function() RXP12.ToggleOptions() end)
 
   local close = CreateFrame("Button", "RXP12FrameClose", f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)

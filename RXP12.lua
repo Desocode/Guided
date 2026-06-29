@@ -977,6 +977,13 @@ local KIND_ICON = {
 }
 -- text only -- the type icon is drawn as a real Texture beside the line, since
 -- 1.12 FontStrings can't render inline |T..|t escapes.
+-- strip |cAARRGGBB...|r color codes (used to grey-out finished steps uniformly)
+local function StripColor(t)
+  t = string.gsub(t, "|c%x%x%x%x%x%x%x%x", "")
+  t = string.gsub(t, "|r", "")
+  return t
+end
+
 local function ElementLine(el)
   if el.kind == "level" then return "|cff88ccff"..(el.text or "").."|r" end
   return el.text or ""
@@ -1282,11 +1289,6 @@ local function RenderRow(r, step, i, cur)
   local dim = (i < cur and not active)
   r.num:SetAlpha(dim and 0.5 or 1)
   r.numStrike:Hide(); r.fsStrike:Hide()
-  if dim then
-    local nw = (r.num.GetStringWidth and r.num:GetStringWidth()) or 10
-    r.numStrike:ClearAllPoints(); r.numStrike:SetPoint("CENTER", r.num, "CENTER", 0, 0)
-    r.numStrike:SetWidth(nw + 2); r.numStrike:SetHeight(2); r.numStrike:SetAlpha(0.55); r.numStrike:Show()
-  end
 
   local h
   if isCur then
@@ -1400,15 +1402,11 @@ local function RenderRow(r, step, i, cur)
     local body = table.concat(lines, "\n")
     if body == "" then body = "|cff777777(no description)|r" end
     r.fs:ClearAllPoints(); r.fs:SetPoint("TOPLEFT", r, "TOPLEFT", fx, -4); r.fs:SetWidth(ROW_WIDTH - fx - 6)
+    if dim then body = StripColor(body) end          -- finished steps: uniform grey, no colors
     r.fs:SetText(body)
-    r.fs:SetAlpha(dim and 0.5 or 1)
+    r.fs:SetTextColor(dim and 0.5 or 1, dim and 0.5 or 1, dim and 0.5 or 1)
+    r.fs:SetAlpha(dim and 0.9 or 1)
     r.fs:Show()
-    if dim then
-      local tw = (r.fs.GetStringWidth and r.fs:GetStringWidth()) or 0
-      if tw <= 0 or tw > (ROW_WIDTH - fx - 6) then tw = ROW_WIDTH - fx - 6 end
-      r.fsStrike:ClearAllPoints(); r.fsStrike:SetPoint("TOPLEFT", r.fs, "TOPLEFT", 0, -6)
-      r.fsStrike:SetWidth(tw); r.fsStrike:SetHeight(2); r.fsStrike:SetAlpha(0.5); r.fsStrike:Show()
-    end
     h = FSHeight(r.fs) + 8
   end
 

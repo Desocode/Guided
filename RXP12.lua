@@ -1264,7 +1264,6 @@ local function GetElemRow(r, j)
   er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", 22, -2)
   er.fs:SetWidth(CONTENT_W - 22)
   er.fs:SetJustifyH("LEFT"); er.fs:SetJustifyV("TOP")
-  er:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
   local function toggle()
     local el = er.element
     if el then el.checked = er.check:GetChecked() and true or false end

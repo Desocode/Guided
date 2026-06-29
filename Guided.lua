@@ -3055,11 +3055,14 @@ end)
 -- (clear it from seen + doneQuests) and route back to the step that accepts it.
 local origAbandonQuest = AbandonQuest
 function AbandonQuest()
+  Guided.dbgFired = (Guided.dbgFired or 0) + 1            -- DEBUG: hook ran
   local nm = GetAbandonQuestName and GetAbandonQuestName()
   if (not nm or nm == "") and GetQuestLogSelection and GetQuestLogTitle then
     local sel = GetQuestLogSelection()                 -- fall back to the selected quest
     if sel and sel > 0 then nm = GetQuestLogTitle(sel) end
   end
+  Guided.dbgName = nm or "(none)"                        -- DEBUG: captured name
+  Guided.dbgRoute = "none"                               -- DEBUG: where we routed
   if nm and nm ~= "" and Guided.active then
     local key = lc(nm)
     Guided.seen[key] = nil                                   -- so the vanish isn't a "hand-in"
@@ -3072,7 +3075,7 @@ function AbandonQuest()
       local qs = Guided.active[i].quests
       for k = 1, table.getn(qs or {}) do
         if qs[k].action == "accept" and lc(QuestName(qs[k].id) or "") == key then
-          if i < (Guided_Save.step or 1) then Guided_Save.step = i end
+          if i < (Guided_Save.step or 1) then Guided_Save.step = i; Guided.dbgRoute = i end
           break
         end
       end

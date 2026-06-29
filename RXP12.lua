@@ -65,6 +65,15 @@ local function lc(s) return string.lower(trim(s or "")) end
 -- format a ".goto" payload for display. The raw form "Zone,58.695,44.266,0,0"
 -- (extra radius/flag numbers, 3 decimals) reads messy inline; show clean rounded
 -- coords: "Go to Zone (58.7, 44.3)".
+-- the goto's radius (the field after x,y) + whether an "optional" field follows.
+-- RXP renders a "Go to" text line only for a positive, non-optional radius.
+local function GotoRadius(raw)
+  local f = {}
+  for part in string.gfind(raw or "", "[^,]+") do tinsert(f, trim(part)) end
+  local ri = f[3] and 4 or 3
+  return tonumber(f[ri]), (f[ri + 1] ~= nil)
+end
+
 local function FormatGoto(raw)
   local f = {}
   for part in string.gfind(raw or "", "[^,]+") do tinsert(f, trim(part)) end
@@ -214,7 +223,7 @@ function RXP12.ParseLine(step, t)
   if disp == "" then disp = nil end
   if disp then tinsert(step.text, Sanitize(disp)) end
 
-  local kind, etext, eid, eobj, eauto, eautogoto = nil, disp, nil, nil, nil, nil
+  local kind, etext, eid, eobj, eauto = nil, disp, nil, nil, nil
 
   if pre == "" then
     if disp then kind = "note" end                       -- a plain ">>text" note
@@ -224,9 +233,14 @@ function RXP12.ParseLine(step, t)
       local _, _, cmd, rest = string.find(pre, "^%.(%S+)%s*(.*)")
       if cmd == "goto" then
         tinsert(step.gotos, rest)
-        kind = "goto"
-        if disp then etext = disp                          -- author's destination text
-        else etext = FormatGoto(rest); eautogoto = true end -- else navigation-only (arrow drives it)
+        if disp then
+          kind = "goto"; etext = disp                          -- author's destination text
+        else
+          local radius, optional = GotoRadius(rest)            -- RXP: a line only for a positive radius
+          if radius and radius > 0 and not optional then
+            kind = "goto"; etext = FormatGoto(rest)
+          end                                                  -- else navigation-only (arrow uses step.gotos)
+        end
       elseif cmd == "accept" or cmd == "complete" or cmd == "turnin" then
         -- RXP form: ".accept <id>", ".turnin <id>", ".complete <id>,<objective>"
         local _, _, id, obj = string.find(rest, "(%d+),?(%d*)")
@@ -314,7 +328,7 @@ function RXP12.ParseLine(step, t)
   end
 
   if kind and etext and etext ~= "" then
-    tinsert(step.elements, { kind = kind, text = Sanitize(etext), id = eid, obj = eobj, cond = lineCond, auto = eauto, autogoto = eautogoto })
+    tinsert(step.elements, { kind = kind, text = Sanitize(etext), id = eid, obj = eobj, cond = lineCond, auto = eauto })
   end
 end
 
@@ -946,18 +960,6 @@ local function StepHasNote(step)
   return false
 end
 
--- does the step have any visible non-goto line? (used to drop the auto "Go to
--- <zone>" line when the author's notes/actions already describe the destination)
-local function StepHasText(step)
-  for j = 1, table.getn(step.elements or {}) do
-    local el = step.elements[j]
-    if el.kind and el.kind ~= "goto" and el.text and el.text ~= "" and CondOK(el.cond) then
-      return true
-    end
-  end
-  return false
-end
-
 -- combined counts for a step's .complete objectives: live "3/7, 1/4" when the
 -- quest is in the log, else the target totals. Returned colored, or nil.
 local function StepCounts(step, live)
@@ -1138,6 +1140,8 @@ local function GetRow(i)
   r.check:SetTexCoord(0.25, 0.5, 0, 1)            -- the "checked" dot frame
   r.check:SetVertexColor(0.3, 1, 0.3)
   r.check:Hide()
+  r.numStrike = r:CreateTexture(nil, "OVERLAY"); r.numStrike:SetTexture(1, 1, 1, 0.6); r.numStrike:Hide()
+  r.fsStrike = r:CreateTexture(nil, "OVERLAY"); r.fsStrike:SetTexture(1, 1, 1, 0.5); r.fsStrike:Hide()
   -- compact body (non-current steps)
   r.fs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
   r.fs:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -4)
@@ -1194,10 +1198,16 @@ local function RenderRow(r, step, i, cur)
     r.check:Hide(); r.num:Show()
   else
     r.bg:Hide(); r.accent:Hide()
-    if i < cur then r.check:Show(); r.num:Hide() else r.check:Hide(); r.num:Show() end
+    r.check:Hide(); r.num:Show()
   end
   local dim = (i < cur and not active)
   r.num:SetAlpha(dim and 0.5 or 1)
+  r.numStrike:Hide(); r.fsStrike:Hide()
+  if dim then
+    local nw = (r.num.GetStringWidth and r.num:GetStringWidth()) or 10
+    r.numStrike:ClearAllPoints(); r.numStrike:SetPoint("CENTER", r.num, "CENTER", 0, 0)
+    r.numStrike:SetWidth(nw + 2); r.numStrike:SetHeight(2); r.numStrike:SetAlpha(0.55); r.numStrike:Show()
+  end
 
   local h
   if isCur then
@@ -1207,12 +1217,11 @@ local function RenderRow(r, step, i, cur)
     local els = step.elements or {}
     local nEls = table.getn(els)
     local hasNote = StepHasNote(step)
-    local hasText = StepHasText(step)
     local killLine = hasNote and StepKillLine(step, true) or nil
     local vis = 0
     for j = 1, nEls do
       local el = els[j]
-      if CondOK(el.cond) and not (el.auto and hasNote) and not (el.autogoto and hasText) then   -- skip folded/navigation lines
+      if CondOK(el.cond) and not (el.auto and hasNote) then   -- skip folded completes
         vis = vis + 1
         local er = GetElemRow(r, vis)
         er.element = el
@@ -1257,7 +1266,7 @@ local function RenderRow(r, step, i, cur)
       local n = 0
       for k = 1, table.getn(step.elements or {}) do
         local el = step.elements[k]
-        if CondOK(el.cond) and not (el.auto and hasNote) and not (el.autogoto and hasText) then
+        if CondOK(el.cond) and not (el.auto and hasNote) then
           n = n + 1
           if not el.checked then return end
         end
@@ -1298,13 +1307,12 @@ local function RenderRow(r, step, i, cur)
       r.kindIcon:Hide()
     end
     local hasNote = StepHasNote(step)
-    local hasText = StepHasText(step)
     local killLine = hasNote and StepKillLine(step, active) or nil
     local lines = {}
     local injected = false
     for j = 1, table.getn(step.elements or {}) do
       local el = step.elements[j]
-      if CondOK(el.cond) and not (el.auto and hasNote) and not (el.autogoto and hasText) then
+      if CondOK(el.cond) and not (el.auto and hasNote) then
         local line = active and ElementLineWithCount(el) or ElementLine(el)
         if el.kind == "note" and not injected and killLine then line = killLine; injected = true end
         tinsert(lines, line)
@@ -1316,6 +1324,12 @@ local function RenderRow(r, step, i, cur)
     r.fs:SetText(body)
     r.fs:SetAlpha(dim and 0.5 or 1)
     r.fs:Show()
+    if dim then
+      local tw = (r.fs.GetStringWidth and r.fs:GetStringWidth()) or 0
+      if tw <= 0 or tw > (ROW_WIDTH - fx - 6) then tw = ROW_WIDTH - fx - 6 end
+      r.fsStrike:ClearAllPoints(); r.fsStrike:SetPoint("TOPLEFT", r.fs, "TOPLEFT", 0, -6)
+      r.fsStrike:SetWidth(tw); r.fsStrike:SetHeight(2); r.fsStrike:SetAlpha(0.5); r.fsStrike:Show()
+    end
     h = FSHeight(r.fs) + 8
   end
 

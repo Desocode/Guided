@@ -1264,6 +1264,7 @@ local function GetElemRow(r, j)
   er.fs:SetPoint("TOPLEFT", er, "TOPLEFT", 22, -2)
   er.fs:SetWidth(CONTENT_W - 22)
   er.fs:SetJustifyH("LEFT"); er.fs:SetJustifyV("TOP")
+  er:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
   local function toggle()
     local el = er.element
     if el then el.checked = er.check:GetChecked() and true or false end
@@ -1368,8 +1369,6 @@ local function BuildRow(parent, name)
   r.useBtn = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
   r.useBtn:SetHeight(18); r.useBtn:SetWidth(120); r.useBtn:SetText("Use quest item"); r.useBtn:Hide()
   r.useBtn:SetScript("OnClick", function() RXP12.UseStep() end)
-  r:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
-  local hl = r:GetHighlightTexture(); if hl then hl:SetVertexColor(1, 1, 1, 0.08) end
   -- left-click does nothing; RIGHT-click opens the menu (with a "Go to step" option)
   r:SetScript("OnMouseUp", function()
     if arg1 == "RightButton" then RXP12.OpenMenu(this.stepIndex, "cursor") end

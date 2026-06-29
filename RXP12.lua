@@ -1087,9 +1087,12 @@ local function GetRow(i)
   r.badgeBg:SetTexture(0.25, 0.25, 0.3, 0.7)
   r.num = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   r.num:SetPoint("CENTER", r.badgeBg, "CENTER", 0, 0)
-  r.check = r:CreateTexture(nil, "OVERLAY")           -- done check over the badge
-  r.check:SetAllPoints(r.badgeBg)
-  r.check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+  r.check = r:CreateTexture(nil, "OVERLAY")           -- done indicator: filled green radio dot
+  r.check:SetWidth(14); r.check:SetHeight(14)
+  r.check:SetPoint("CENTER", r.badgeBg, "CENTER", 0, 0)
+  r.check:SetTexture("Interface\\Buttons\\UI-RadioButton")
+  r.check:SetTexCoord(0.25, 0.5, 0, 1)            -- the "checked" dot frame
+  r.check:SetVertexColor(0.3, 1, 0.3)
   r.check:Hide()
   -- compact body (non-current steps)
   r.fs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlight")

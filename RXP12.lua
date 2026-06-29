@@ -2006,7 +2006,7 @@ local function CreateOptions()
 
   local note = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   note:SetPoint("BOTTOM", f, "BOTTOM", 0, 8)
-  note:SetText("Professions are handled automatically by skill level.")
+  note:SetText("Profession steps show/hide automatically from your skill levels.")
 
   local close = CreateFrame("Button", "RXP12OptionsClose", f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
@@ -2042,6 +2042,11 @@ local DUNGEON_NAMES = {
   RFK="Razorfen Kraul", RFD="Razorfen Downs", ZF="Zul'Farrak", MARA="Maraudon", ST="Sunken Temple",
   BRD="Blackrock Depths", ULDA="Uldaman",
 }
+-- global list (roughly by level) so dungeons can be configured anytime, not per-guide
+local DUNGEON_ORDER = {
+  "RFC", "WC", "DM", "SFK", "BFD", "STOCKADES", "GNOMER", "RFK", "SM",
+  "RFD", "ULDA", "ZF", "MARA", "ST", "BRD",
+}
 local dungeonChecks = {}
 
 local function CreateDungeons()
@@ -2067,13 +2072,13 @@ local function CreateDungeons()
   local none = CreateFrame("Button", "RXP12DungeonNone", f, "UIPanelButtonTemplate")
   none:SetWidth(70); none:SetHeight(20); none:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 8); none:SetText("None")
   none:SetScript("OnClick", function()
-    RXP12_Save.dungeons = {}; RXP12.BuildActive(); RXP12.SkipForward(); RXP12.ShowDungeons()
+    RXP12_Save.dungeons = {}; RXP12.BuildActive(); RXP12.SkipForward(); RXP12.UpdateUI(); RXP12.ShowDungeons()
   end)
   local all = CreateFrame("Button", "RXP12DungeonAll", f, "UIPanelButtonTemplate")
   all:SetWidth(70); all:SetHeight(20); all:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 8); all:SetText("All")
   all:SetScript("OnClick", function()
-    for i = 1, table.getn(RXP12.dungeonCodes or {}) do RXP12_Save.dungeons[RXP12.dungeonCodes[i]] = true end
-    RXP12.BuildActive(); RXP12.SkipForward(); RXP12.ShowDungeons()
+    for i = 1, table.getn(DUNGEON_ORDER) do RXP12_Save.dungeons[DUNGEON_ORDER[i]] = true end
+    RXP12.BuildActive(); RXP12.SkipForward(); RXP12.UpdateUI(); RXP12.ShowDungeons()
   end)
   local close = CreateFrame("Button", "RXP12DungeonClose", f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2); close:SetScript("OnClick", function() f:Hide() end)
@@ -2083,7 +2088,7 @@ end
 function RXP12.ShowDungeons()
   CreateDungeons()
   local f = RXP12DungeonFrame
-  local codes = RXP12.dungeonCodes or {}
+  local codes = DUNGEON_ORDER          -- full list, independent of the loaded guide
   local n = table.getn(codes)
   for i = 1, n do
     local c = dungeonChecks[i]
@@ -2094,7 +2099,7 @@ function RXP12.ShowDungeons()
       c:SetScript("OnClick", function()
         if this.code then
           RXP12_Save.dungeons[this.code] = this:GetChecked() and true or nil
-          RXP12.BuildActive(); RXP12.SkipForward()
+          RXP12.BuildActive(); RXP12.SkipForward(); RXP12.UpdateUI()
         end
       end)
       dungeonChecks[i] = c
@@ -2106,8 +2111,8 @@ function RXP12.ShowDungeons()
     c:Show()
   end
   for i = n + 1, table.getn(dungeonChecks) do dungeonChecks[i]:Hide() end
-  if n == 0 then f.empty:Show() else f.empty:Hide() end
-  f:SetHeight(70 + (n > 0 and n or 1) * 22)
+  f.empty:Hide()
+  f:SetHeight(70 + n * 22)
   f:Show()
 end
 

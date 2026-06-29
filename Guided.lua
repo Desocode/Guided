@@ -930,6 +930,94 @@ function Guided.ArrowUpdate(elapsed)
   else txt:SetText(string.format("%d yds", dist)) end
 end
 
+-- ---- minimap step pins (player-relative, recomputed each tick) ----
+-- Astrolabe's hardcoded minimap view diameters (yards) per zoom. Assume a north-up
+-- minimap (1.12 default); if it rotates, counter-rotate the offsets by player facing.
+local MM_OUTDOOR = { [0] = 466.7, [1] = 400, [2] = 333.3, [3] = 266.7, [4] = 200, [5] = 133.3 }
+local function MinimapDiameter()
+  local z = (Minimap and Minimap.GetZoom and Minimap:GetZoom()) or 3
+  return MM_OUTDOOR[z] or MM_OUTDOOR[3]
+end
+
+local mmPins = {}
+local function GetMMPin(i)
+  if mmPins[i] then return mmPins[i] end
+  local f = CreateFrame("Frame", "GuidedMMPin"..i, Minimap)
+  f:SetWidth(14); f:SetHeight(14); f:SetFrameStrata("HIGH")
+  local bg = f:CreateTexture(nil, "BACKGROUND")
+  bg:SetAllPoints(f)
+  bg:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")   -- faint circle
+  bg:SetVertexColor(0, 0, 0); bg:SetAlpha(0.35)
+  local num = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  num:SetPoint("CENTER", f, "CENTER", 0, 0); f.num = num
+  mmPins[i] = f
+  return f
+end
+
+function Guided.UpdateMinimapPins()
+  for i = 1, table.getn(mmPins) do mmPins[i]:Hide() end
+  if Guided_Save.minimappins == false or not Guided.active or not Minimap then return end
+  local px, py = GetPlayerMapPosition("player")
+  if (not px) or (px == 0 and py == 0) then return end          -- no usable position (instance, etc.)
+  local znorm = normalize(GetRealZoneText() or "")
+  local zoneW = ZONE_YARDS[GetRealZoneText() or ""] or 3500
+  local zoneH = zoneW / 1.5
+  local mmW = Minimap:GetWidth()
+  local diameter = MinimapDiameter()
+  if not mmW or mmW == 0 or not diameter or diameter == 0 then return end
+  local pixPerYard = mmW / diameter
+  local edge = mmW / 2 - 7
+  local facing = 0                                              -- north-up unless the minimap rotates
+  local okc, cv = pcall(GetCVar, "rotateMinimap")
+  if okc and cv == "1" then facing = GetPlayerFacing() or 0 end
+  local cosf, sinf = math.cos(facing), math.sin(facing)
+
+  local cur = Guided_Save.step or 1
+  local active = Guided.active
+  local shown = 0
+  local function place(ai)
+    if shown >= 7 then return end
+    local st = active[ai]; if not st then return end
+    local gs = st.gotos and st.gotos[1]; if not gs then return end
+    local zone, _, tx, ty = ParseGoto(gs)
+    if not (zone and tx and ty) or normalize(zone) ~= znorm then return end
+    local sx = (tx / 100 - px) * zoneW                          -- east+
+    local sy = -((ty / 100 - py) * zoneH)                       -- north+ (map y is south+)
+    if facing ~= 0 then
+      local rx = sx * cosf + sy * sinf
+      local ry = -sx * sinf + sy * cosf
+      sx, sy = rx, ry
+    end
+    local ox, oy = sx * pixPerYard, sy * pixPerYard
+    if math.sqrt(ox * ox + oy * oy) > edge then return end       -- off the minimap (arrow covers far)
+    shown = shown + 1
+    local pin = GetMMPin(shown)
+    local n = Guided.dispNum and Guided.dispNum[ai]
+    pin.num:SetText(n and tostring(n) or "")
+    if ai == cur then pin.num:SetTextColor(0.3, 1, 0.3) else pin.num:SetTextColor(1, 1, 1) end
+    pin:ClearAllPoints(); pin:SetPoint("CENTER", Minimap, "CENTER", ox, oy); pin:Show()
+  end
+  if Guided.activeStickies then
+    for ai in pairs(Guided.activeStickies) do if ai < cur then place(ai) end end
+  end
+  local last = table.getn(active)
+  local stop = cur + 60; if stop > last then stop = last end
+  for ai = cur, stop do if shown >= 7 then break end place(ai) end
+end
+
+function Guided.StartMinimapPins()
+  if Guided.mmUpdater then return end
+  local u = CreateFrame("Frame", "GuidedMMUpdater", UIParent)
+  u.t = 0
+  u:SetScript("OnUpdate", function()
+    this.t = this.t + (arg1 or 0)
+    if this.t < 0.1 then return end
+    this.t = 0
+    if Guided.UpdateMinimapPins then Guided.UpdateMinimapPins() end
+  end)
+  Guided.mmUpdater = u
+end
+
 local function CreateArrow()
   if GuidedArrow then return end
   local a = CreateFrame("Frame", "GuidedArrow", UIParent)
@@ -2583,8 +2671,12 @@ local function CreateOptions()
     function() return Guided_Save.hidedone end,
     function(v) Guided_Save.hidedone = v; Guided.UpdateUI() end,
     "Remove finished steps from the list instead of greying them out.")
+  MakeCheck(pD, "GuidedOptMMPins", "Minimap step pins", -34,
+    function() return Guided_Save.minimappins ~= false end,
+    function(v) Guided_Save.minimappins = v; if Guided.UpdateMinimapPins then Guided.UpdateMinimapPins() end end,
+    "Show numbered pins for nearby upcoming steps on the minimap.")
   local slbl = pD:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  slbl:SetPoint("TOPLEFT", pD, "TOPLEFT", 16, -34); slbl:SetText("Window scale")
+  slbl:SetPoint("TOPLEFT", pD, "TOPLEFT", 16, -62); slbl:SetText("Window scale")
   local s = CreateFrame("EditBox", "GuidedOptScale", pD, "InputBoxTemplate")
   s:SetWidth(46); s:SetHeight(20); s:SetPoint("LEFT", slbl, "RIGHT", 14, 0)
   s:SetAutoFocus(false); s:SetMaxLetters(5)
@@ -2606,7 +2698,7 @@ local function CreateOptions()
     this:SetText(string.format("%.3g", Guided_Save.scale or 1)); this:ClearFocus()
   end)
   local op = CreateFrame("Slider", "GuidedOptOpacity", pD, "OptionsSliderTemplate")
-  op:SetWidth(300); op:SetHeight(16); op:SetPoint("TOP", pD, "TOP", 0, -82)
+  op:SetWidth(300); op:SetHeight(16); op:SetPoint("TOP", pD, "TOP", 0, -110)
   op:SetMinMaxValues(0, 1); op:SetValueStep(0.05)
   getglobal("GuidedOptOpacityLow"):SetText("0")
   getglobal("GuidedOptOpacityHigh"):SetText("1")
@@ -2739,6 +2831,7 @@ function Guided.ToggleOptions(tab)
   if GuidedOptTracker then GuidedOptTracker:SetChecked(Guided_Save.tracker == true) end
   if GuidedOptFly then GuidedOptFly:SetChecked(Guided_Save.autofly ~= false) end
   if GuidedOptHideDone then GuidedOptHideDone:SetChecked(Guided_Save.hidedone == true) end
+  if GuidedOptMMPins then GuidedOptMMPins:SetChecked(Guided_Save.minimappins ~= false) end
   if GuidedOptSkipOver then GuidedOptSkipOver:SetChecked(Guided_Save.skipoverlevel ~= false) end
   if GuidedOptHardcore then GuidedOptHardcore:SetChecked(Guided_Save.hardcore == true) end
   if GuidedOptGroup then GuidedOptGroup:SetChecked(Guided_Save.groupquests == true) end
@@ -2801,6 +2894,7 @@ local function Defaults()
   if Guided_Save.done == nil then Guided_Save.done = {} end   -- legacy (unused)
   if Guided_Save.doneQuests == nil then Guided_Save.doneQuests = {} end  -- [questId]=true: observed hand-ins
   if Guided_Save.minimap == nil then Guided_Save.minimap = true end
+  if Guided_Save.minimappins == nil then Guided_Save.minimappins = true end
   if Guided_Save.splits == nil then Guided_Save.splits = {} end
   if Guided_Save.tracker == nil then Guided_Save.tracker = false end
   if Guided_Save.autofly == nil then Guided_Save.autofly = true end
@@ -2887,6 +2981,7 @@ local function OnEvent()
     Guided.BuildActive()
     CreateUI()
     CreateArrow()
+    Guided.StartMinimapPins()
     Guided.UpdateMinimapButton()
     Guided.trk = { t0 = GetTime(), xp = 0, lastXP = UnitXP("player") or 0,
                   lastMax = UnitXPMax("player") or 1, lvlStart = GetTime() }

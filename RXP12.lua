@@ -1274,10 +1274,6 @@ local function GetElemRow(r, j)
   er.check:SetScript("OnClick", toggle)
   er:SetScript("OnClick", er._onclick)
   er:SetScript("OnMouseUp", function() if arg1 == "RightButton" then RXP12.OpenMenu(er:GetParent().stepIndex, "cursor") end end)
-  er:SetScript("OnEnter", function()
-    if er.tip then GameTooltip:SetOwner(er, "ANCHOR_RIGHT"); GameTooltip:SetText(er.tip, 1, 1, 1, 1, 1); GameTooltip:Show() end
-  end)
-  er:SetScript("OnLeave", function() GameTooltip:Hide() end)
   r.elems[j] = er
   return er
 end
@@ -1373,6 +1369,10 @@ local function BuildRow(parent, name)
   r:SetScript("OnMouseUp", function()
     if arg1 == "RightButton" then RXP12.OpenMenu(this.stepIndex, "cursor") end
   end)
+  if parent == RXP12ScrollChild then            -- hover highlight on list rows only
+    r:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
+    local hl = r:GetHighlightTexture(); if hl then hl:SetVertexColor(1, 1, 1, 0.08) end
+  end
   return r
 end
 
@@ -1460,7 +1460,7 @@ local function RenderRow(r, step, i, cur, expand)
         er:SetWidth(CONTENT_W); er:SetHeight(eh)
         er:ClearAllPoints(); er:SetPoint("TOPLEFT", r, "TOPLEFT", CONTENT_X, -y)
         er:Show()
-        y = y + eh + 2
+        y = y + eh + (vis > 1 and 1 or 5)   -- substeps tight; more space under the top line
       end
     end
     -- (objective counts are shown inline on each .complete line above)

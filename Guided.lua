@@ -1817,7 +1817,9 @@ local function RenderRow(r, step, i, cur, expand)
   end
   local dim = (i < cur and not active)
   r.num:SetAlpha(dim and 0.5 or 1)
-  if dn then r.num:Show(); r.badgeBg:Show() else r.num:Hide(); r.badgeBg:Hide() end
+  -- sticky side-steps keep their slot in the numbering (so the next main step keeps
+  -- the right number) but don't show a number badge -- they read as side steps.
+  if dn and not step.sticky then r.num:Show(); r.badgeBg:Show() else r.num:Hide(); r.badgeBg:Hide() end
   r.numStrike:Hide(); r.fsStrike:Hide()
 
   local h

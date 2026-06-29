@@ -161,6 +161,32 @@ function Guided.SkillCheck(step)
   return true
 end
 
+-- run-mode filters (settings-driven, like RXP): a step tagged with #season,
+-- #xprate, or #hardcore/#softcore shows only when it matches the player's settings.
+local function SeasonOK(step)
+  if not step.season then return true end
+  local sea = Guided_Save.season or 0
+  for v in string.gfind(tostring(step.season), "%d+") do
+    if tonumber(v) == sea then return true end
+  end
+  return false
+end
+local function XpRateOK(step)
+  if not step.xprate then return true end
+  local rate = Guided_Save.xprate or 1
+  local _, _, op, num = string.find(tostring(step.xprate), "([<>]?)%s*([0-9.]+)")
+  num = tonumber(num)
+  if not num then return true end
+  if op == "<" then return rate < num
+  elseif op == ">" then return rate > num end
+  return true
+end
+local function ModeOK(step)
+  if step.hardcore and not Guided_Save.hardcore then return false end
+  if step.softcore and Guided_Save.hardcore then return false end
+  return true
+end
+
 function Guided.BuildActive()
   Guided.active = {}
   Guided.labelIndex = {}      -- step #label -> index in active (for #completewith <label>)
@@ -177,7 +203,7 @@ function Guided.BuildActive()
     if st.dungeonskip and not seenD[st.dungeonskip] then seenD[st.dungeonskip] = true; tinsert(Guided.dungeonCodes, st.dungeonskip) end
     if Guided.EvalCondition(st.cond) and Guided.DungeonCheck(st)
         and (not st.maxlevel or UnitLevel("player") <= st.maxlevel)
-        and Guided.SkillCheck(st) then
+        and Guided.SkillCheck(st) and SeasonOK(st) and XpRateOK(st) and ModeOK(st) then
       tinsert(Guided.active, st)
       local s = Guided.active[table.getn(Guided.active)]
       if s.label and s.label ~= true then Guided.labelIndex[s.label] = table.getn(Guided.active) end
@@ -2142,10 +2168,14 @@ local function MakeCheck(parent, name, label, y, getter, setter, desc)
   return c
 end
 
+function Guided.SeasonName(sv)
+  return ({ [0] = "Era", [1] = "Season of Mastery", [2] = "Season of Discovery" })[sv or 0] or "Era"
+end
+
 local function CreateOptions()
   if GuidedOptionsFrame then return end
   local f = CreateFrame("Frame", "GuidedOptionsFrame", UIParent)
-  f:SetWidth(452); f:SetHeight(404)
+  f:SetWidth(452); f:SetHeight(470)
   f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
   f:SetBackdrop({
     bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -2249,8 +2279,29 @@ local function CreateOptions()
     function() return Guided_Save.skipoverlevel ~= false end,
     function(v) Guided_Save.skipoverlevel = v; Guided.BuildActive(); Guided.SkipForward(); Guided.UpdateUI() end,
     "Automatically skip grind/level steps once you're already past their target level.")
+  MakeCheck(pR, "GuidedOptHardcore", "Hardcore mode", -28,
+    function() return Guided_Save.hardcore end,
+    function(v) Guided_Save.hardcore = v; Guided.BuildActive(); Guided.SkipForward(); Guided.UpdateUI() end,
+    "Use the route's hardcore variants (cautious play, no risky steps).")
+  local seab = CreateFrame("Button", "GuidedOptSeason", pR, "UIPanelButtonTemplate")
+  seab:SetWidth(220); seab:SetHeight(20); seab:SetPoint("TOPLEFT", pR, "TOPLEFT", 16, -58)
+  seab:SetText("Realm: "..Guided.SeasonName(Guided_Save.season))
+  seab:SetScript("OnClick", function()
+    Guided_Save.season = mymod((Guided_Save.season or 0) + 1, 3)
+    this:SetText("Realm: "..Guided.SeasonName(Guided_Save.season))
+    Guided.BuildActive(); Guided.SkipForward(); Guided.UpdateUI()
+  end)
+  local xpr = CreateFrame("Slider", "GuidedOptXpRate", pR, "OptionsSliderTemplate")
+  xpr:SetWidth(220); xpr:SetHeight(16); xpr:SetPoint("TOPLEFT", pR, "TOPLEFT", 16, -100)
+  xpr:SetMinMaxValues(1, 3); xpr:SetValueStep(0.1)
+  getglobal("GuidedOptXpRateLow"):SetText("1x"); getglobal("GuidedOptXpRateHigh"):SetText("3x")
+  getglobal("GuidedOptXpRateText"):SetText("Server XP rate")
+  xpr:SetValue(Guided_Save.xprate or 1)
+  xpr:SetScript("OnValueChanged", function()
+    Guided_Save.xprate = this:GetValue(); Guided.BuildActive(); Guided.SkipForward(); Guided.UpdateUI()
+  end)
   local rhdr = pR:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  rhdr:SetPoint("TOPLEFT", pR, "TOPLEFT", 2, -40); rhdr:SetText("|cffffd200Dungeons|r")
+  rhdr:SetPoint("TOPLEFT", pR, "TOPLEFT", 2, -132); rhdr:SetText("|cffffd200Dungeons|r")
   local rhdiv = pR:CreateTexture(nil, "ARTWORK")
   rhdiv:SetPoint("TOPLEFT", rhdr, "BOTTOMLEFT", 0, -3); rhdiv:SetWidth(414); rhdiv:SetHeight(1)
   rhdiv:SetTexture(1, 1, 1, 0.12)
@@ -2262,7 +2313,7 @@ local function CreateOptions()
     c:SetWidth(22); c:SetHeight(22)
     local col, row = 0, i - 1
     if i > 8 then col = 1; row = i - 9 end
-    c:SetPoint("TOPLEFT", pR, "TOPLEFT", 2 + col * 208, -92 - row * 23)
+    c:SetPoint("TOPLEFT", pR, "TOPLEFT", 2 + col * 208, -172 - row * 23)
     getglobal(c:GetName().."Text"):SetText(DUNGEON_NAMES[code] or code)
     c.code = code
     c:SetChecked(Guided_Save.dungeons[code] and true or false)
@@ -2351,6 +2402,9 @@ function Guided.ToggleOptions(tab)
   if GuidedOptHideDone then GuidedOptHideDone:SetChecked(Guided_Save.hidedone == true) end
   if GuidedOptStepBelow then GuidedOptStepBelow:SetChecked(Guided_Save.stepbelow == true) end
   if GuidedOptSkipOver then GuidedOptSkipOver:SetChecked(Guided_Save.skipoverlevel ~= false) end
+  if GuidedOptHardcore then GuidedOptHardcore:SetChecked(Guided_Save.hardcore == true) end
+  if GuidedOptSeason then GuidedOptSeason:SetText("Realm: "..Guided.SeasonName(Guided_Save.season)) end
+  if GuidedOptXpRate then GuidedOptXpRate:SetValue(Guided_Save.xprate or 1) end
   Guided.RefreshDungeonChecks()
   Guided.OptTab(tab or Guided.optTab or "General")
   GuidedOptionsFrame:Show()
@@ -2413,6 +2467,9 @@ local function Defaults()
   if Guided_Save.hidedone == nil then Guided_Save.hidedone = false end
   if Guided_Save.stepbelow == nil then Guided_Save.stepbelow = false end
   if Guided_Save.skipoverlevel == nil then Guided_Save.skipoverlevel = true end
+  if Guided_Save.season == nil then Guided_Save.season = 0 end   -- 0=Era, 1=SoM, 2=SoD
+  if Guided_Save.xprate == nil then Guided_Save.xprate = 1 end
+  if Guided_Save.hardcore == nil then Guided_Save.hardcore = false end
 end
 
 -- score a guide for "is this the right one to start me on?" given the player level.

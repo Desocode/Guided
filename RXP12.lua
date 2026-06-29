@@ -62,6 +62,27 @@ local function normalize(s) return string.gsub(string.lower(s or ""), "%s", "") 
 local function mymod(a, b) return a - math.floor(a / b) * b end
 local function lc(s) return string.lower(trim(s or "")) end
 
+-- format a ".goto" payload for display. The raw form "Zone,58.695,44.266,0,0"
+-- (extra radius/flag numbers, 3 decimals) reads messy inline; show clean rounded
+-- coords: "Go to Zone (58.7, 44.3)".
+local function FormatGoto(raw)
+  local f = {}
+  for part in string.gfind(raw or "", "[^,]+") do tinsert(f, trim(part)) end
+  local zone, x, y
+  if f[1] and not tonumber(f[1]) then
+    zone = f[1]; x = tonumber(f[2]); y = tonumber(f[3])
+  elseif f[3] then
+    x = tonumber(f[2]); y = tonumber(f[3])      -- mapid,x,y
+  else
+    x = tonumber(f[1]); y = tonumber(f[2])       -- x,y (current zone)
+  end
+  if x and y then
+    if zone then return string.format("Go to %s (%.1f, %.1f)", zone, x, y) end
+    return string.format("Go to (%.1f, %.1f)", x, y)
+  end
+  return "Go to "..(raw or "")
+end
+
 -- guides gate steps by client/version with "<<" tokens (era/sod/tbc/...). On a
 -- 1.12 / Turtle client we ARE vanilla-era content; everything else is absent, so
 -- "sod"/"som"/"tbc"/"wotlk"/"cata"/"mop"/"retail"/"df" tokens evaluate false.
@@ -163,7 +184,7 @@ function RXP12.ParseLine(step, t)
       local _, _, cmd, rest = string.find(pre, "^%.(%S+)%s*(.*)")
       if cmd == "goto" then
         tinsert(step.gotos, rest)
-        kind = "goto"; etext = disp or ("Go to "..rest)
+        kind = "goto"; etext = disp or FormatGoto(rest)
       elseif cmd == "accept" or cmd == "complete" or cmd == "turnin" then
         -- RXP form: ".accept <id>", ".turnin <id>", ".complete <id>,<objective>"
         local _, _, id, obj = string.find(rest, "(%d+),?(%d*)")
@@ -189,6 +210,13 @@ function RXP12.ParseLine(step, t)
       elseif cmd == "vendor" or cmd == "buy" then kind = "vendor"; etext = disp or (rest ~= "" and rest) or "Vendor"
       elseif cmd == "train" or cmd == "trainer" then kind = "train"; etext = disp or "Train your spells"
       elseif cmd == "hearth" or cmd == "sethearth" or cmd == "home" then kind = "hearth"; etext = disp or "Hearthstone"
+      elseif cmd == "xp" then
+        -- ".xp <level>" = grind until that level; treat it as a level gate so the
+        -- step auto-completes on ding (else it sits as a stuck text-only step).
+        local _, _, lvl = string.find(rest, "(%d+)")
+        lvl = tonumber(lvl)
+        if lvl and lvl >= 1 and lvl <= 60 then step.level = step.level or lvl end
+        kind = "level"; etext = disp or ("Grind to level "..(lvl or "?"))
       elseif disp then kind = "note"; etext = disp        -- any other command, show its text only
       end
     elseif first == "#" then
@@ -735,8 +763,15 @@ local function ObjectiveProgress(step)
           SelectQuestLogEntry(i)
           for j = 1, GetNumQuestLeaderBoards() do
             if (not q.obj) or j == q.obj then
-              local _, _, d = GetQuestLogLeaderBoard(j)
-              total = total + 1; if d then done = done + 1 end
+              local txt, _, d = GetQuestLogLeaderBoard(j)
+              -- prefer the "x / y" counts in the objective text so the bar fills
+              -- per kill; fall back to the done flag for uncounted objectives.
+              local _, _, have, need = string.find(txt or "", "(%d+)%s*/%s*(%d+)")
+              if have and tonumber(need) and tonumber(need) > 0 then
+                done = done + tonumber(have); total = total + tonumber(need)
+              else
+                total = total + 1; if d then done = done + 1 end
+              end
             end
           end
           break
@@ -824,8 +859,10 @@ local function GetRow(i)
   r.bar:Hide()
   r:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
   local hl = r:GetHighlightTexture(); if hl then hl:SetVertexColor(1, 1, 1, 0.08) end
-  r:SetScript("OnClick", function() if this.stepIndex then RXP12.SetStep(this.stepIndex) end end)
-  r:SetScript("OnMouseUp", function() if arg1 == "RightButton" then RXP12.ToggleMenu() end end)
+  -- left-click does nothing (avoids accidental jumps); RIGHT-click jumps to the step
+  r:SetScript("OnMouseUp", function()
+    if arg1 == "RightButton" and this.stepIndex then RXP12.SetStep(this.stepIndex) end
+  end)
   r:SetScript("OnEnter", function()
     if this.tip then GameTooltip:SetOwner(this, "ANCHOR_RIGHT"); GameTooltip:SetText(this.tip, 1, 1, 1, 1, 1); GameTooltip:Show() end
   end)
@@ -962,7 +999,7 @@ local function RenderRow(r, step, i, cur)
   end
 
   -- tooltip on the whole row = first goto coords / hint
-  r.tip = (step.gotos and step.gotos[1]) and ("Go to: "..step.gotos[1]) or "Click to jump to this step"
+  r.tip = (step.gotos and step.gotos[1]) and FormatGoto(step.gotos[1]) or "Right-click to jump here"
   if h < 20 then h = 20 end
   r:SetHeight(h); r:SetWidth(ROW_WIDTH)
   return h

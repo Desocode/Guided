@@ -1051,9 +1051,11 @@ function Guided.UpdateMinimapPins()
 
   local cur = Guided_Save.step or 1
   local active = Guided.active
-  local shown = 0
-  local function place(ai)
-    if shown >= 7 then return end
+
+  -- 1) collect candidate points that fall on the minimap
+  local pts = {}
+  local function consider(ai)
+    if table.getn(pts) >= 12 then return end
     local st = active[ai]; if not st then return end
     local gs = st.gotos and st.gotos[1]; if not gs then return end
     local zone, _, tx, ty = ParseGoto(gs)
@@ -1067,19 +1069,41 @@ function Guided.UpdateMinimapPins()
     end
     local ox, oy = sx * pixPerYard, sy * pixPerYard
     if math.sqrt(ox * ox + oy * oy) > edge then return end       -- off the minimap (arrow covers far)
-    shown = shown + 1
-    local pin = GetMMPin(shown)
-    local n = (not st.sticky) and Guided.dispNum and Guided.dispNum[ai] or nil
-    pin.num:SetText(n and tostring(n) or "")
-    if ai == cur then pin.num:SetTextColor(0.3, 1, 0.3) else pin.num:SetTextColor(1, 1, 1) end
-    pin:ClearAllPoints(); pin:SetPoint("CENTER", Minimap, "CENTER", ox, oy); pin:Show()
+    tinsert(pts, { ox = ox, oy = oy, ai = ai,
+                   num = (not st.sticky) and Guided.dispNum and Guided.dispNum[ai] or nil })
   end
   if Guided.activeStickies then
-    for ai in pairs(Guided.activeStickies) do if ai < cur then place(ai) end end
+    for ai in pairs(Guided.activeStickies) do if ai < cur then consider(ai) end end
   end
   local last = table.getn(active)
   local stop = cur + 60; if stop > last then stop = last end
-  for ai = cur, stop do if shown >= 7 then break end place(ai) end
+  for ai = cur, stop do consider(ai) end
+
+  -- 2) cluster overlapping pins (the minimap is small), one marker per group
+  local n = table.getn(pts)
+  local used, r2, ci = {}, 14 * 14, 0
+  for i = 1, n do
+    if not used[i] then
+      used[i] = true
+      local sx, sy, cnt, minNum, hasCur = pts[i].ox, pts[i].oy, 1, pts[i].num, (pts[i].ai == cur)
+      for j = i + 1, n do
+        if not used[j] then
+          local dx, dy = pts[i].ox - pts[j].ox, pts[i].oy - pts[j].oy
+          if dx * dx + dy * dy <= r2 then
+            used[j] = true; sx = sx + pts[j].ox; sy = sy + pts[j].oy; cnt = cnt + 1
+            if pts[j].num and (not minNum or pts[j].num < minNum) then minNum = pts[j].num end
+            if pts[j].ai == cur then hasCur = true end
+          end
+        end
+      end
+      ci = ci + 1
+      if ci > 8 then break end
+      local pin = GetMMPin(ci)
+      pin.num:SetText(minNum and tostring(minNum) or "")
+      if hasCur then pin.num:SetTextColor(0.3, 1, 0.3) else pin.num:SetTextColor(1, 1, 1) end
+      pin:ClearAllPoints(); pin:SetPoint("CENTER", Minimap, "CENTER", sx / cnt, sy / cnt); pin:Show()
+    end
+  end
 end
 
 function Guided.StartMinimapPins()

@@ -1,6 +1,6 @@
 --[[ Guided -- lean leveling-guide engine for the WoW 1.12 (vanilla) client.
 
-  Parses RXPGuides-format guide text (the `step` / `.goto` / `.accept` DSL) and
+  Parses step-based guide text (the `step` / `.goto` / `.accept` DSL) and
   drives the steps with manual Next/Prev plus best-effort auto-advance off the
   1.12 quest log + level. Quest IDs in guides are resolved to names via a bundled
   quest-name table (Data\QuestNames.lua), since the 1.12 API exposes no quest IDs.
@@ -8,7 +8,7 @@
   Fully self-contained: NO external addon dependency. The direction arrow uses a
   bundled sprite sheet (img\arrow.tga) + the native minimap-arrow facing trick.
 
-  This is NOT a port of RXPGuides (that addon is Ace3 + modern-Classic APIs and
+  This is NOT a port of any guide addon (those need Ace3 + modern-Classic APIs and
   cannot run on Lua 5.0). It's a small native engine that consumes the route data.
 
   Status: MVP. Syntax-checked only -- not tested in-game yet.
@@ -32,7 +32,7 @@ local function Print(msg)
   DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99Guided|r: "..msg)
 end
 
--- RXP guides use custom colour tokens (|cRXP_FRIENDLY_..|r) that are NOT valid
+-- guides use custom colour tokens (|cRXP_FRIENDLY_..|r) that are NOT valid
 -- WoW colour codes (which need |cAARRGGBB) -- on 1.12 they render as garbage.
 -- Translate them to real colours; anything unknown becomes plain white.
 local RXP_COLORS = {
@@ -66,7 +66,7 @@ local function lc(s) return string.lower(trim(s or "")) end
 -- (extra radius/flag numbers, 3 decimals) reads messy inline; show clean rounded
 -- coords: "Go to Zone (58.7, 44.3)".
 -- the goto's radius (the field after x,y) + whether an "optional" field follows.
--- RXP renders a "Go to" text line only for a positive, non-optional radius.
+-- a "Go to" text line is shown only for a positive, non-optional radius.
 local function GotoRadius(raw)
   local f = {}
   for part in string.gfind(raw or "", "[^,]+") do tinsert(f, trim(part)) end
@@ -103,7 +103,7 @@ local function MatchToken(tok)
       or CLIENT_TRAITS[nx] == true
 end
 
--- evaluate an RXP "<<" condition. Grammar:
+-- evaluate a step's "<<" condition. Grammar:
 --   space-separated groups are AND'd; "/" inside a group is OR; "!" negates;
 --   a trailing "-- comment" is ignored. e.g. "Human Paladin", "Warrior/Rogue", "!Warlock"
 function Guided.EvalCondition(cond)
@@ -161,7 +161,7 @@ function Guided.SkillCheck(step)
   return true
 end
 
--- run-mode filters (settings-driven, like RXP): a step tagged with #season,
+-- run-mode filters (settings-driven): a step tagged with #season,
 -- #xprate, or #hardcore/#softcore shows only when it matches the player's settings.
 local function SeasonOK(step)
   if not step.season then return true end
@@ -186,7 +186,7 @@ local function ModeOK(step)
   if step.softcore and Guided_Save.hardcore then return false end
   return true
 end
--- group-quest filter (RXP stepLogic.GroupCheck): with group quests off, ".group"
+-- group-quest filter: with group quests off, ".group"
 -- steps are hidden and their ".solo" pairs shown; with it on, the reverse. The
 -- per-line "<< class" cond decides who the directive applies to.
 local function GroupCheck(step)
@@ -228,8 +228,8 @@ function Guided.BuildActive()
   table.sort(Guided.dungeonCodes)
   local n = table.getn(Guided.active)
   if (Guided_Save.step or 1) > n then Guided_Save.step = (n > 0 and n) or 1 end
-  -- number every active step in sequence, sticky side-steps included (RXP does
-  -- this -- the step after a sticky keeps the next number, so e.g. a kill side-step
+  -- number every active step in sequence, sticky side-steps included: the step
+  -- after a sticky keeps the next number, so e.g. a kill side-step
   -- is 2 and the grind after it is 3, not 2).
   Guided.dispNum = {}
   for i = 1, n do Guided.dispNum[i] = i end
@@ -248,7 +248,7 @@ end
 -- parse one in-step line into the step table. Besides the engine-facing fields
 -- (step.text / step.gotos / step.quests / step.level), each visible line becomes
 -- an ordered "element" { kind, text, id, obj } so the UI can show a typed icon
--- per line (accept/turnin/goto/vendor/...) the way RXP does.
+-- per line (accept/turnin/goto/vendor/...).
 function Guided.ParseLine(step, t)
   -- a trailing "<< cond" applies that condition to THIS line only (per-line filter,
   -- e.g. ">>train Battle Shout << Warrior"). Evaluated per-character at use time,
@@ -284,13 +284,13 @@ function Guided.ParseLine(step, t)
         if disp then
           kind = "goto"; etext = disp                          -- author's destination text
         else
-          local radius, optional = GotoRadius(rest)            -- RXP: a line only for a positive radius
+          local radius, optional = GotoRadius(rest)            -- a line only for a positive radius
           if radius and radius > 0 and not optional then
             kind = "goto"; etext = FormatGoto(rest)
           end                                                  -- else navigation-only (arrow uses step.gotos)
         end
       elseif cmd == "accept" or cmd == "complete" or cmd == "turnin" then
-        -- RXP form: ".accept <id>", ".turnin <id>", ".complete <id>,<objective>"
+        -- form: ".accept <id>", ".turnin <id>", ".complete <id>,<objective>"
         local _, _, id, obj = string.find(rest, "(%d+),?(%d*)")
         eid = tonumber(id); eobj = tonumber(obj)
         local _, _, tnum = string.find(rest, "%(x?(%d+)%)")    -- target count from "(x7)"
@@ -317,8 +317,8 @@ function Guided.ParseLine(step, t)
       elseif cmd == "train" or cmd == "trainer" then kind = "train"; etext = disp or "Train your spells"
       elseif cmd == "hearth" or cmd == "sethearth" or cmd == "home" or cmd == "hs" then kind = "hearth"; etext = disp or "Hearthstone"
       elseif cmd == "xp" then
-        -- RXP ".xp [<]level[+/-xp][,skipstep]": a level/xp gate (see functions.xp).
-        -- When satisfied the step is treated done and hidden (bypassed), like RXP.
+        -- ".xp [<]level[+/-xp][,skipstep]": a level/xp gate.
+        -- When satisfied the step is treated done and hidden (bypassed).
         local part, skip = rest, nil
         local cc = string.find(rest, ",", 1, true)
         if cc then part = string.sub(rest, 1, cc - 1); skip = trim(string.sub(rest, cc + 1)) end
@@ -368,7 +368,7 @@ function Guided.ParseLine(step, t)
         end
       elseif cmd == "target" or cmd == "mob" then
         local nm = rest
-        nm = string.gsub(nm, '"', "")          -- RXP uses quotes for partial match
+        nm = string.gsub(nm, '"', "")          -- quotes denote a partial match
         nm = string.gsub(nm, "^%+", "")         -- and a leading + for "additional"
         nm = trim(nm)
         if nm ~= "" then
@@ -380,7 +380,7 @@ function Guided.ParseLine(step, t)
         end
       elseif cmd == "isOnQuest" or cmd == "isNotOnQuest" or cmd == "isQuestComplete"
           or cmd == "isQuestTurnedIn" or cmd == "isQuestAvailable" then
-        -- quest-state gates (RXP .isOnQuest/.isQuestTurnedIn/...): skip this step
+        -- quest-state gates (.isOnQuest/.isQuestTurnedIn/...): skip this step
         -- unless the condition holds. ids are OR'd; the Not/Available forms reverse it.
         local ids = {}
         for v in string.gfind(rest, "%d+") do tinsert(ids, tonumber(v)) end
@@ -447,7 +447,7 @@ function Guided.ParseLine(step, t)
   end
 end
 
--- parse a full RXP-format guide string into { name, steps = { ... } }
+-- parse a full guide string into { name, steps = { ... } }
 -- detect a guide's faction from its group/name/defaultfor text. Era.lua bundles
 -- both factions with no per-file guard, so this keeps the cog menu + auto-detect
 -- to the player's faction. nil = neutral (shown to both, e.g. dungeon/T0.5 sets).
@@ -527,8 +527,8 @@ function Guided.RegisterGuide(text)
   Guided.guides[guide.name] = guide
 end
 
--- accept RXP guide data files dropped in unchanged (they call this global),
--- as long as the real RXPGuides addon hasn't already claimed it
+-- accept guide data files dropped in unchanged (they call a global registration
+-- function); define it unless something else already provides it
 if type(RXPGuides) ~= "table" then RXPGuides = {} end
 if type(RXPGuides.RegisterGuide) ~= "function" then
   RXPGuides.RegisterGuide = Guided.RegisterGuide
@@ -643,11 +643,11 @@ local function ParseGoto(raw)
   return f[1], nil, tonumber(f[2]), tonumber(f[3])                 -- zoneName,x,y
 end
 
--- World-map pins (self-contained, no Astrolabe/Ace): a numbered marker for every
+-- World-map pins (self-contained, no external map libs): a numbered marker for every
 -- active step whose goto is in the zone the map is showing. On the zone's own map
 -- the goto x,y (0-100) map straight onto WorldMapDetailFrame (the actual map image),
 -- so no cross-map translation is needed. Pooled; current step highlighted green.
--- (Cross-continent placement would need Astrolabe's static zone tables; deferred.)
+-- (Cross-continent placement would need static per-zone size tables; deferred.)
 -- one-line summary of a step for the map tooltip (first element/note, colors stripped)
 local function StepSummaryText(st)
   if not st then return "" end
@@ -710,10 +710,10 @@ local function DisplayedZoneName()
 end
 
 -- map-pin tuning. PIN_CLUSTER_PX: merge radius for grouping nearby waypoints.
--- PIN_LOOKAHEAD: how many steps ahead of the current one to scan (RXP caps map pins
--- the same way via numMapPins, default 7). PIN_MAX: most grouped markers drawn.
+-- PIN_LOOKAHEAD: how many steps ahead of the current one to scan (a small
+-- look-ahead, ~7). PIN_MAX: most grouped markers drawn.
 local PIN_CLUSTER_PX = 18
-local PIN_LOOKAHEAD  = 7    -- max waypoints shown ahead of the current step (RXP numMapPins ~ 7)
+local PIN_LOOKAHEAD  = 7    -- max waypoints shown ahead of the current step
 local PIN_SCAN       = 80   -- how many steps ahead to scan to find those waypoints
 local PIN_MAX        = 8    -- hard safety cap on grouped markers
 
@@ -755,7 +755,7 @@ function Guided.UpdateWorldMapPins()
     consider(ai)
   end
 
-  -- 2) greedy proximity grouping (RXP-style); draw at most PIN_MAX grouped markers.
+  -- 2) greedy proximity grouping; draw at most PIN_MAX grouped markers.
   local npts = table.getn(pts)
   local used = {}
   local r2 = PIN_CLUSTER_PX * PIN_CLUSTER_PX
@@ -801,10 +801,10 @@ function Guided.SetWaypoint(step)
   if Guided.UpdateWorldMapPins then Guided.UpdateWorldMapPins() end
 end
 
--- Native player facing for the arrow (no pfQuest / SuperWoW needed). On 1.12 the
+-- Native player facing for the arrow (no external libs needed). On 1.12 the
 -- minimap player-arrow is an unnamed Model child of Minimap whose :GetFacing()
 -- gives the heading; if the minimap is set to rotate, read the compass ring instead.
--- (Same trick pfQuest uses in compat/client.lua.)
+-- (reads the minimap arrow Model's facing directly.)
 local minimapArrow
 local function FindMinimapArrow()
   local kids = { Minimap:GetChildren() }
@@ -817,7 +817,7 @@ local function FindMinimapArrow()
       end
     end
   end
-  return kids[9]   -- pfQuest's fallback: the arrow is usually the 9th child
+  return kids[9]   -- fallback: the arrow is usually the 9th child
 end
 local function GetPlayerFacing()
   if not minimapArrow then minimapArrow = FindMinimapArrow() end
@@ -838,7 +838,7 @@ end
 
 -- On-screen direction arrow pointing at the current step's first .goto.
 -- Uses Guided's own bundled arrow sprite-sheet + the native GetPlayerFacing above;
--- the angle->cell math is copied verbatim from pfQuest/TomTomVanilla (proven).
+-- the angle->cell sprite-sheet math.
 local SHEET = "Interface\\AddOns\\Guided\\img\\arrow"
 local arrowThrottle = 0
 
@@ -963,7 +963,7 @@ function Guided.ArrowUpdate(elapsed)
 end
 
 -- ---- minimap step pins (player-relative, recomputed each tick) ----
--- Astrolabe's hardcoded minimap view diameters (yards) per zoom. Assume a north-up
+-- hardcoded minimap view diameters (yards) per zoom. Assume a north-up
 -- minimap (1.12 default); if it rotates, counter-rotate the offsets by player facing.
 local MM_OUTDOOR = { [0] = 466.7, [1] = 400, [2] = 333.3, [3] = 266.7, [4] = 200, [5] = 133.3 }
 local function MinimapDiameter()
@@ -1109,7 +1109,7 @@ end
 
 -- is a step already satisfied? text-only steps (no quests, no level) are never
 -- "auto-done" -- they need a manual Next so we don't skip instructions.
--- RXP's .xp gate test (matches functions.xp completion logic)
+-- .xp gate test (level/xp completion logic)
 function Guided.XpGateMet(g)
   if not g then return false end
   local lvl = UnitLevel("player") or 1
@@ -1217,7 +1217,7 @@ end
 -- own condition is met, and we move on to the next non-sticky step. Stops at the
 -- first step that isn't done/sticky, or the last step.
 -- evaluate a step's .isQuest* gates against live quest state. Unmet -> the step is
--- skipped (RXP marks step.completed). Unknown quest id (not in our DB) -> treated as
+-- skipped (the step is marked complete). Unknown quest id (not in our DB) -> treated as
 -- met, so we never hide a step we can't judge.
 function Guided.StepGateMet(step, log)
   if not step.gates then return true end
@@ -1481,7 +1481,7 @@ local function ObjectiveLines(step)
 end
 
 -- ---------------------------------------------------------------------- UI ----
--- RXP-style scrolling step list. Each step is a "card": a numbered badge in the
+-- scrolling step list. Each step is a "card": a numbered badge in the
 -- left gutter + content on the right. Each content line carries a typed inline
 -- icon (accept/turnin/goto/vendor/...). The current step is expanded into one
 -- checkbox row per element (tick to mark done; all ticked -> auto-advance) plus
@@ -1508,7 +1508,7 @@ local KIND_ICON = {
   hearth   = "Interface\\Icons\\INV_Misc_Rune_01",
 }
 
--- objective/instruction icons (matches RXP's picks): kill = crossed swords,
+-- objective/instruction icons: kill = crossed swords,
 -- collect = loot bag, generic complete = cross, "talk to" = speech bubble.
 local ICON_KILL    = "Interface\\GossipFrame\\BattleMasterGossipIcon"
 local ICON_COLLECT = "Interface\\GossipFrame\\VendorGossipIcon"
@@ -2038,7 +2038,7 @@ function Guided.WheelScroll(dir)
   GuidedScrollFrame:SetVerticalScroll(v)
 end
 
--- countdown bar for ".timer" steps (we draw our own; RXP's LibCandyBar is Ace3,
+-- countdown bar for ".timer" steps (we draw our own; Ace bar libraries are
 -- unavailable on 1.12). Starts on arrival at a timed step, hides at 0.
 local function EnsureTimerBar()
   if GuidedTimerBar then return end
@@ -2200,7 +2200,7 @@ function Guided.UpdateUI()
 end
 
 -- ------------------------------------------------------ guide-select menu ----
--- RXP-style cog menu: a native UIDropDownMenu whose top level has Options +
+-- cog menu: a native UIDropDownMenu whose top level has Options +
 -- Auto-detect, then one expandable submenu per guide #group (subcategory); the
 -- submenu lists that group's guides (current one checked). Click a guide to load.
 function Guided.LoadGuideByName(name)
@@ -2950,7 +2950,7 @@ end
 
 -- ----------------------------------------------------------- guide import ----
 -- Register pasted guides at runtime (no client restart) via the same path guide
--- files use. Accepts either raw guide text or one/more RXPGuides.RegisterGuide([[
+-- files use. Accepts either raw guide text or one/more RegisterGuide([[
 -- ... ]]) blocks. Persists the raw text per character so imports survive /reload.
 function Guided.ShowDungeons() Guided.ToggleOptions("Routing") end
 

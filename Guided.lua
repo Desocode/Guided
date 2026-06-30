@@ -394,6 +394,48 @@ function Guided.ParseLine(step, t)
           tinsert(step.gates, { t = t, ids = ids, rev = rev })
         end
         if disp then kind = "note"; etext = disp end
+      elseif cmd == "zone" then
+        -- ".zone <mapID> >> text": travel step; completes when you enter that zone
+        local _, _, mid = string.find(rest, "(%d+)")
+        local nm = mid and Guided_ZoneDB and Guided_ZoneDB[tonumber(mid)]
+        if nm then step.zonegoal = nm end
+        if disp then kind = "goto"; etext = disp
+        elseif nm then kind = "goto"; etext = "Travel to "..nm end
+      elseif cmd == "zoneskip" or cmd == "subzoneskip" then
+        -- skip this step while you're in (or, reversed, NOT in) the given zone(s)
+        local _, _, ip, fp = string.find(rest, "^([%d%+/]+),?%s*(%d*)")
+        local ids = {}
+        for v in string.gfind(ip or rest, "%d+") do tinsert(ids, tonumber(v)) end
+        if table.getn(ids) > 0 then
+          local g = { ids = ids, rev = (mymod(tonumber(fp) or 0, 2) == 1) }
+          if cmd == "subzoneskip" then step.subzoneskip = g else step.zoneskip = g end
+        end
+        if disp then kind = "note"; etext = disp end
+      elseif cmd == "itemcount" then
+        -- step is satisfied (skipped) when your count of the item(s) meets the test
+        local _, _, ip, opnum = string.find(rest, "^([%d%+/]+)%s*,%s*(.+)")
+        if ip and opnum then
+          local ids = {}
+          for v in string.gfind(ip, "%d+") do tinsert(ids, tonumber(v)) end
+          local _, _, op, num = string.find(opnum, "([<>]?)=?%s*(%d+)")
+          if table.getn(ids) > 0 and num then
+            step.itemcount = { ids = ids, op = op or "", total = tonumber(num) }
+          end
+        end
+        if disp then kind = "note"; etext = disp end
+      elseif cmd == "itemStat" then
+        -- show while the equipped item's stat meets the test (QUALITY/LEVEL on 1.12)
+        local _, _, slot, st, opval = string.find(rest, "^(%d+)%s*,%s*([^,]+)%s*,%s*(.+)")
+        if slot and st and opval then
+          local _, _, op, val = string.find(opval, "([<>]?)%s*([%d%.]+)")
+          if val then step.itemstat = { slot = tonumber(slot), stat = trim(st), op = op or "", total = tonumber(val) } end
+        end
+        if disp then kind = "note"; etext = disp end
+      elseif cmd == "money" then
+        -- show only while your gold is below (<) or above (>) the amount
+        local _, _, op, amt = string.find(rest, "([<>])%s*([%d%.]+)")
+        if op and amt then step.money = { gt = (op == ">"), amount = tonumber(amt) } end
+        if disp then kind = "note"; etext = disp end
       elseif cmd == "timer" then
         -- ".timer <minutes>,<label>": author countdown, shown while the step is active
         local _, _, mins, lbl = string.find(rest, "([0-9.]+)%s*,?%s*(.*)")
@@ -498,6 +540,7 @@ function Guided.Parse(text, headerOnly)
             guide.subgroup = v
           end
         elseif key == "next" then guide.nextguide = trim(val)          -- chains to the next guide
+        elseif key == "loop" then guide.loop = true                     -- repeats from step 1 when finished
         end
       else
         Guided.ParseLine(step, t)
@@ -1126,6 +1169,7 @@ end
 
 function Guided.IsStepDone(step, log)
   if not step then return false end
+  if step.zonegoal and (GetRealZoneText() == step.zonegoal or GetZoneText() == step.zonegoal) then return true end
   if step.level and UnitLevel("player") >= step.level then return true end
   if step.xpGate and (step.xpGate.skip or Guided_Save.skipoverlevel ~= false) and Guided.XpGateMet(step.xpGate) then return true end
   if table.getn(step.quests) == 0 then return false end
@@ -1244,6 +1288,49 @@ function Guided.StepGateMet(step, log)
       if not met then return false end
     end
   end
+  -- prerequisite: a #requires step must be done first
+  if step.requires and Guided.labelIndex then
+    local ti = Guided.labelIndex[step.requires]
+    if ti and not Guided.StepDoneByIndex(ti, log) then return false end
+  end
+  -- .zoneskip: skip while in (or reversed: while not in) a known zone
+  if step.zoneskip then
+    local z, inZone, known = lc(GetRealZoneText() or ""), false, false
+    for k = 1, table.getn(step.zoneskip.ids) do
+      local nm = Guided_ZoneDB and Guided_ZoneDB[step.zoneskip.ids[k]]
+      if nm then known = true; if lc(nm) == z then inZone = true end end
+    end
+    if known then
+      local skip = inZone; if step.zoneskip.rev then skip = not skip end
+      if skip then return false end
+    end
+  end
+  -- .itemcount: satisfied (skip) when the bag count meets the test
+  if step.itemcount then
+    local c = 0
+    for k = 1, table.getn(step.itemcount.ids) do c = c + ((GetItemCount and GetItemCount(step.itemcount.ids[k])) or 0) end
+    local op, tot = step.itemcount.op, step.itemcount.total
+    if (op == "<" and c < tot) or (op == ">" and c > tot) or (op == "" and c == tot) then return false end
+  end
+  -- .money: show only while gold is under/over the amount
+  if step.money then
+    local gold = ((GetMoney and GetMoney()) or 0) / 10000
+    local show; if step.money.gt then show = gold > step.money.amount else show = gold < step.money.amount end
+    if not show then return false end
+  end
+  -- .itemStat: show while the equipped item's QUALITY/LEVEL meets the test (other stats not readable on 1.12 -> fail open)
+  if step.itemstat then
+    local is, stat = step.itemstat, nil
+    if is.stat == "QUALITY" then stat = GetInventoryItemQuality and GetInventoryItemQuality("player", is.slot)
+    elseif is.stat == "LEVEL" then
+      local id = GetInventoryItemID and GetInventoryItemID("player", is.slot)
+      if id and GetItemInfo then local _, _, _, lvl = GetItemInfo(id); stat = lvl end
+    end
+    if stat ~= nil then
+      local show = (is.op == "<" and is.total > stat) or (is.op == ">" and is.total < stat) or (is.op == "" and is.total == stat)
+      if not show then return false end
+    end
+  end
   return true
 end
 
@@ -1330,9 +1417,11 @@ function Guided.SkipForward()
       break
     end
   end
-  -- finished the last step -> chain to the guide's #next, once (guarded against loops)
+  -- finished the last step
   local g = Guided.CurrentGuide()
-  if g and g.nextguide and Guided.guides[g.nextguide] and n > 0
+  if g and g.loop and n > 0 and (Guided_Save.step or 1) >= n and Guided.StepDoneByIndex(n, log) then
+    Guided_Save.step = 1                                              -- #loop: restart the guide
+  elseif g and g.nextguide and Guided.guides[g.nextguide] and n > 0
      and (Guided_Save.step or 1) >= n and Guided.StepDoneByIndex(n, log)
      and Guided.chainedFrom ~= Guided_Save.guide then
     Guided.chainedFrom = Guided_Save.guide
@@ -3068,6 +3157,9 @@ local ev = CreateFrame("Frame", "GuidedEvents")
 ev:RegisterEvent("VARIABLES_LOADED")
 ev:RegisterEvent("PLAYER_LOGIN")
 ev:RegisterEvent("QUEST_LOG_UPDATE")
+ev:RegisterEvent("ZONE_CHANGED_NEW_AREA")  -- re-evaluate .zoneskip / .zone
+ev:RegisterEvent("BAG_UPDATE")             -- re-evaluate .itemcount
+ev:RegisterEvent("PLAYER_MONEY")           -- re-evaluate .money
 ev:RegisterEvent("UNIT_QUEST_LOG_CHANGED")
 ev:RegisterEvent("PLAYER_LEVEL_UP")
 ev:RegisterEvent("PLAYER_XP_UPDATE")
@@ -3085,6 +3177,9 @@ ev:RegisterEvent("QUEST_TIMER_START")
 local function OnEvent()
   if event == "WORLD_MAP_UPDATE" then Guided.UpdateWorldMapPins(); return end
   if event == "QUEST_TIMER_UPDATE" or event == "QUEST_TIMER_START" then Guided.UpdateTimerBar(); return end
+  if event == "BAG_UPDATE" or event == "PLAYER_MONEY" or event == "ZONE_CHANGED_NEW_AREA" then
+    if Guided.SkipForward then Guided.SkipForward() end; return
+  end
   if event == "VARIABLES_LOADED" then
     Defaults()
   elseif event == "PLAYER_LOGIN" then

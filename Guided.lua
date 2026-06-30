@@ -1224,8 +1224,8 @@ function Guided.IsStepDone(step, log)
         if Guided.seen[key] and not entry then                       -- seen, now gone = turned in
           Guided_Save.doneQuests = Guided_Save.doneQuests or {}
           if q.id then Guided_Save.doneQuests[q.id] = true end       -- remember the hand-in (persisted)
-        else
-          return false
+        elseif not (Guided_Save.doneQuests and q.id and Guided_Save.doneQuests[q.id]) then
+          return false                                               -- not turned in (or a same-named quest is back in the log)
         end
       end
     end
@@ -1511,6 +1511,26 @@ local function GossipQuestList(getter)
 end
 
 -- handle a quest/gossip frame event when auto mode is on. pcall'd by caller.
+-- record a quest hand-in by matching the QUEST_COMPLETE title to an active step's
+-- .turnin quest id. Reliable for same-named chains (turn in A, accept same-named B):
+-- the title is captured AT turn-in, before any re-accept puts the name back in the log.
+function Guided.RecordTurnin(title)
+  if not title or title == "" or not Guided.active then return end
+  title = lc(title)
+  Guided_Save.doneQuests = Guided_Save.doneQuests or {}
+  for i = 1, table.getn(Guided.active) do
+    local qs = Guided.active[i].quests
+    if qs then
+      for k = 1, table.getn(qs) do
+        local q = qs[k]
+        if q.action == "turnin" and q.id and lc(QuestName(q.id) or "") == title then
+          Guided_Save.doneQuests[q.id] = true
+        end
+      end
+    end
+  end
+end
+
 function Guided.HandleQuestEvent(e)
   if Guided.debug then
     local na = table.getn(GossipQuestList(GetGossipAvailableQuests))
@@ -3276,6 +3296,7 @@ local function OnEvent()
       or event == "QUEST_COMPLETE" or event == "QUEST_GREETING"
       or event == "GOSSIP_SHOW" then
     if event == "GOSSIP_SHOW" then Guided.HandleTaxiGossip() end
+    if event == "QUEST_COMPLETE" then Guided.RecordTurnin(GetTitleText and GetTitleText() or "") end
     Guided.HandleQuestEvent(event)
   end
 end

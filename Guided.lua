@@ -315,7 +315,14 @@ function Guided.ParseLine(step, t)
         step.fly = step.fly or trim(rest)   -- destination name for auto-taxi
       elseif cmd == "vendor" or cmd == "buy" then kind = "vendor"; etext = disp or (rest ~= "" and rest) or "Vendor"
       elseif cmd == "train" or cmd == "trainer" then kind = "train"; etext = disp or "Train your spells"
-      elseif cmd == "hearth" or cmd == "sethearth" or cmd == "home" or cmd == "hs" then kind = "hearth"; etext = disp or "Hearthstone"
+      elseif cmd == "hearth" or cmd == "sethearth" or cmd == "home" or cmd == "hs" then
+        kind = "hearth"; etext = disp or "Hearthstone"
+        if cmd == "home" or cmd == "sethearth" then
+          local _, _, loc = string.find(disp or "", "[Tt]o%s+(.+)$")          -- set HS: done when bound here
+          if loc then step.homename = lc(trim(loc)) end
+        else
+          step.ishs = true                                                    -- use HS: done when you reach home
+        end
       elseif cmd == "xp" then
         -- ".xp [<]level[+/-xp][,skipstep]": a level/xp gate.
         -- When satisfied the step is treated done and hidden (bypassed).
@@ -1196,6 +1203,14 @@ end
 function Guided.IsStepDone(step, log)
   if not step then return false end
   if step.zonegoal and (GetRealZoneText() == step.zonegoal or GetZoneText() == step.zonegoal) then return true end
+  if step.homename and GetBindLocation then                          -- .home: hearthstone bound to the target inn
+    local b = GetBindLocation()
+    if b and string.find(lc(b), step.homename, 1, true) then return true end
+  end
+  if step.ishs and GetBindLocation then                              -- .hs: you've arrived back at your home
+    local b = lc(GetBindLocation() or "")
+    if b ~= "" and (lc(GetRealZoneText() or "") == b or lc(GetSubZoneText() or "") == b) then return true end
+  end
   if step.level and UnitLevel("player") >= step.level then return true end
   if step.xpGate and (step.xpGate.skip or Guided_Save.skipoverlevel ~= false) and Guided.XpGateMet(step.xpGate) then return true end
   if table.getn(step.quests) == 0 then return false end
@@ -3341,6 +3356,15 @@ function AbandonQuest()
     if bestI then Guided_Save.step = bestI; Guided.justAbandonedId = bestId end
   end
   if origAbandonQuest then origAbandonQuest() end   -- QUEST_LOG_UPDATE then re-runs SkipForward with the quest gone
+end
+
+-- binding a hearthstone at an innkeeper calls ConfirmBinder(); re-check so a .home
+-- step advances once GetBindLocation() reflects the new inn. (No bind event on 1.12;
+-- if the bind hasn't propagated yet, the next quest/zone event picks it up.)
+local origConfirmBinder = ConfirmBinder
+function ConfirmBinder()
+  if origConfirmBinder then origConfirmBinder() end
+  if Guided.SkipForward then Guided.SkipForward() end
 end
 
 -- ----------------------------------------------------------------- slash ----

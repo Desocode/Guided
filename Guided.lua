@@ -2463,9 +2463,8 @@ local function CreateMinimapButton()
   b:RegisterForDrag("LeftButton")
   local icon = b:CreateTexture(nil, "BACKGROUND")
   icon:SetWidth(18); icon:SetHeight(18); icon:SetPoint("CENTER", b, "CENTER", 0, 1)
-  icon:SetTexture(Guided_Save.mmicon or "Interface\\Icons\\Spell_Nature_Sentinal")   -- owl (nature)
+  icon:SetTexture("Interface\\Icons\\Spell_Nature_Sentinal")   -- owl (nature)
   icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)                  -- trim border to fit the ring
-  b.icon = icon
   local ring = b:CreateTexture(nil, "OVERLAY")
   ring:SetWidth(53); ring:SetHeight(53); ring:SetPoint("TOPLEFT", b, "TOPLEFT", 0, 0)
   ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
@@ -2502,79 +2501,6 @@ end
 function Guided.UpdateMinimapButton()
   CreateMinimapButton()
   if Guided_Save.minimap == false then GuidedMinimapButton:Hide() else GuidedMinimapButton:Show() end
-end
-
-function Guided.SetMMIcon(tex)
-  Guided_Save.mmicon = tex
-  if GuidedMinimapButton and GuidedMinimapButton.icon then
-    GuidedMinimapButton.icon:SetTexture(tex)
-    GuidedMinimapButton.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-  end
-end
-
--- Icon picker. GetNumMacroIcons/GetMacroIconInfo enumerate exactly the icons this
--- client actually ships, so anything shown here is guaranteed to render.
-local ICON_COLS, ICON_ROWS = 10, 9
-function Guided.RefreshIconBrowser()
-  local f = GuidedIconBrowser; if not f then return end
-  local per = ICON_COLS * ICON_ROWS
-  local n = (GetNumMacroIcons and GetNumMacroIcons()) or 0
-  local maxp = math.floor((n - 1) / per); if maxp < 0 then maxp = 0 end
-  if f.page < 0 then f.page = 0 elseif f.page > maxp then f.page = maxp end
-  for i = 1, per do
-    local b = f.btns[i]
-    local idx = f.page * per + i
-    if idx <= n then
-      local tx = GetMacroIconInfo(idx)
-      b.tx = tx; b.tex:SetTexture(tx); b:Show()
-    else b.tx = nil; b:Hide() end
-  end
-  getglobal("GuidedIconPage"):SetText("Page "..(f.page + 1).." / "..(maxp + 1).."  ("..n.." icons)")
-end
-
-function Guided.ShowIconBrowser()
-  local f = GuidedIconBrowser
-  if not f then
-    f = CreateFrame("Frame", "GuidedIconBrowser", UIParent)
-    f:SetWidth(16 + ICON_COLS * 30 + 14); f:SetHeight(40 + ICON_ROWS * 30 + 34)
-    f:SetPoint("CENTER", UIParent, "CENTER", 0, 0); f:SetFrameStrata("DIALOG")
-    f:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 16,
-      insets = { left = 4, right = 4, top = 4, bottom = 4 } })
-    f:SetBackdropColor(0.05, 0.05, 0.07, 0.95)
-    f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", function() this:StartMoving() end)
-    f:SetScript("OnDragStop", function() this:StopMovingOrSizing() end)
-    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOP", f, "TOP", 0, -10); title:SetText("Guided 
-88 click an icon")
-    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
-    f.btns = {}
-    for i = 1, ICON_COLS * ICON_ROWS do
-      local b = CreateFrame("Button", nil, f)
-      b:SetWidth(26); b:SetHeight(26)
-      b:SetPoint("TOPLEFT", f, "TOPLEFT", 14 + mymod(i - 1, ICON_COLS) * 30,
-                 -34 - math.floor((i - 1) / ICON_COLS) * 30)
-      local t = b:CreateTexture(nil, "BACKGROUND"); t:SetAllPoints(b); b.tex = t
-      b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
-      b:SetScript("OnClick", function() if this.tx then Guided.SetMMIcon(this.tx) end end)
-      f.btns[i] = b
-    end
-    f.page = 0
-    local pg = f:CreateFontString("GuidedIconPage", "OVERLAY", "GameFontHighlightSmall")
-    pg:SetPoint("BOTTOM", f, "BOTTOM", 0, 12)
-    local prev = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    prev:SetWidth(58); prev:SetHeight(20); prev:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 14, 8); prev:SetText("Prev")
-    prev:SetScript("OnClick", function() GuidedIconBrowser.page = GuidedIconBrowser.page - 1; Guided.RefreshIconBrowser() end)
-    local nxt = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    nxt:SetWidth(58); nxt:SetHeight(20); nxt:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 8); nxt:SetText("Next")
-    nxt:SetScript("OnClick", function() GuidedIconBrowser.page = GuidedIconBrowser.page + 1; Guided.RefreshIconBrowser() end)
-    f:EnableMouseWheel(true)
-    f:SetScript("OnMouseWheel", function() GuidedIconBrowser.page = GuidedIconBrowser.page - arg1; Guided.RefreshIconBrowser() end)
-  end
-  f:Show()
-  Guided.RefreshIconBrowser()
 end
 
 -- --------------------------------------------------------- leveling tracker ----
@@ -3179,7 +3105,6 @@ SlashCmdList["GUIDED"] = function(msg)
   elseif cmd == "target" then Guided.TargetStep()
   elseif cmd == "use" then Guided.UseStep()
   elseif cmd == "tracker" then Guided.ToggleTracker()
-  elseif cmd == "icons" or cmd == "icon" then Guided.ShowIconBrowser()
   elseif cmd == "minimap" then
     Guided_Save.minimap = (Guided_Save.minimap == false); Guided.UpdateMinimapButton()
     Print("Minimap button "..(Guided_Save.minimap ~= false and "shown" or "hidden"))

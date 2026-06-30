@@ -577,6 +577,16 @@ function Guided.SetStep(i, dir)
       i = ni; guard = guard + 1
     else break end
   end
+  -- never rest on a sticky/done/gated step: if the directional skip stopped on one
+  -- (e.g. back-nav hit step 1 but it's already accepted/done), skip FORWARD to the
+  -- next real step instead.
+  local g2 = 0
+  while g2 < 500 do
+    local st = Guided.active[i]
+    if st and (st.sticky or Guided.StepDoneByIndex(i, log) or not Guided.StepGateMet(st, log)) and i < n then
+      i = i + 1; g2 = g2 + 1
+    else break end
+  end
   Guided_Save.step = i
   -- going back: clear manual radio ticks on the steps you've left. Auto-tracked
   -- objectives re-derive on render, so only genuinely manual ticks reset.
@@ -1315,6 +1325,15 @@ function Guided.SkipForward()
     else
       break
     end
+  end
+  -- finished the last step -> chain to the guide's #next, once (guarded against loops)
+  local g = Guided.CurrentGuide()
+  if g and g.nextguide and Guided.guides[g.nextguide] and n > 0
+     and (Guided_Save.step or 1) >= n and Guided.StepDoneByIndex(n, log)
+     and Guided.chainedFrom ~= Guided_Save.guide then
+    Guided.chainedFrom = Guided_Save.guide
+    Guided.LoadGuideByName(g.nextguide)
+    return
   end
   Guided.UpdateUI()
 end
@@ -2056,18 +2075,30 @@ end
 function Guided.UpdateTimerBar()
   local cur = Guided.active and Guided.active[Guided_Save.step]
   local t = cur and cur.timer
-  if not t then
-    if GuidedTimerBar then GuidedTimerBar:Hide() end
-    Guided.timerStep = nil
+  if t then                                 -- author ".timer" on the current step
+    EnsureTimerBar()
+    Guided.gameTimer = nil
+    if Guided.timerStep ~= cur then         -- newly arrived at this timed step: (re)start
+      Guided.timerStep = cur
+      Guided.timerEnd = GetTime() + t.secs
+      Guided.timerTotal = t.secs
+      GuidedTimerBarLabel:SetText(t.label or "Timer")
+      GuidedTimerBar:Show()
+    end
     return
   end
-  EnsureTimerBar()
-  if Guided.timerStep ~= cur then         -- newly arrived at this timed step: (re)start
-    Guided.timerStep = cur
-    Guided.timerEnd = GetTime() + t.secs
-    Guided.timerTotal = t.secs
-    GuidedTimerBarLabel:SetText(t.label or "Timer")
+  Guided.timerStep = nil
+  -- no author timer: surface a real game quest timer (escort / Iverron's Antidote / etc.)
+  local secs = GetQuestTimers and GetQuestTimers()
+  if secs and secs > 0 then
+    EnsureTimerBar()
+    if not Guided.gameTimer then Guided.gameTimer = true; Guided.timerTotal = secs end
+    Guided.timerEnd = GetTime() + secs      -- re-sync remaining (the bar's OnUpdate ticks between)
+    GuidedTimerBarLabel:SetText("Quest timer")
     GuidedTimerBar:Show()
+  else
+    Guided.gameTimer = nil
+    if GuidedTimerBar then GuidedTimerBar:Hide() end
   end
 end
 
@@ -3036,9 +3067,12 @@ ev:RegisterEvent("QUEST_GREETING")
 ev:RegisterEvent("GOSSIP_SHOW")
 ev:RegisterEvent("WORLD_MAP_UPDATE")   -- reposition the world-map pin as the map opens/pans/zooms
 ev:RegisterEvent("TAXIMAP_OPENED")     -- auto flight paths (gated on Guided_Save.auto)
+ev:RegisterEvent("QUEST_TIMER_UPDATE") -- surface game quest timers in the timer bar
+ev:RegisterEvent("QUEST_TIMER_START")
 
 local function OnEvent()
   if event == "WORLD_MAP_UPDATE" then Guided.UpdateWorldMapPins(); return end
+  if event == "QUEST_TIMER_UPDATE" or event == "QUEST_TIMER_START" then Guided.UpdateTimerBar(); return end
   if event == "VARIABLES_LOADED" then
     Defaults()
   elseif event == "PLAYER_LOGIN" then

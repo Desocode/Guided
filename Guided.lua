@@ -475,6 +475,8 @@ function Guided.ParseLine(step, t)
       if val then val = trim(string.gsub(val, "%s*%-%-.*$", "")) end
       if key == "level" then
         step.level = tonumber(val); kind = "level"; etext = disp or ("Reach level "..(val or "?"))
+      elseif key == "optional" then
+        step.optional = true; kind = "note"; etext = "|cff888888(optional)|r"
       elseif key then
         step[key] = (val ~= "" and val) or true
       end
@@ -825,7 +827,7 @@ function Guided.UpdateWorldMapPins()
       for k = 1, count do
         if cl[k].ai == cur then hasCur = true end
         local nm = cl[k].num
-        if nm and (not minNum or nm < minNum) then minNum = nm end   -- lowest step number in the group
+        if nm and not (cl[k].st and cl[k].st.sticky) and (not minNum or nm < minNum) then minNum = nm end   -- lowest non-sticky step number
       end
       local label
       if minNum then label = tostring(minNum); if count > 1 then label = label.."+" end
@@ -1067,7 +1069,7 @@ function Guided.UpdateMinimapPins()
     if math.sqrt(ox * ox + oy * oy) > edge then return end       -- off the minimap (arrow covers far)
     shown = shown + 1
     local pin = GetMMPin(shown)
-    local n = Guided.dispNum and Guided.dispNum[ai]
+    local n = (not st.sticky) and Guided.dispNum and Guided.dispNum[ai] or nil
     pin.num:SetText(n and tostring(n) or "")
     if ai == cur then pin.num:SetTextColor(0.3, 1, 0.3) else pin.num:SetTextColor(1, 1, 1) end
     pin:ClearAllPoints(); pin:SetPoint("CENTER", Minimap, "CENTER", ox, oy); pin:Show()
@@ -2151,6 +2153,7 @@ local function EnsureTimerBar()
   tt:SetPoint("RIGHT", bar, "RIGHT", -6, 0)
   tb:SetScript("OnUpdate", function()
     if not Guided.timerEnd then return end
+    if Guided.gameTimer and QuestTimerFrame and QuestTimerFrame:IsVisible() then QuestTimerFrame:Hide() end
     local rem = Guided.timerEnd - GetTime()
     if rem <= 0 then
       GuidedTimerBarFill:SetValue(0); GuidedTimerBarTime:SetText("0:00")
@@ -2456,6 +2459,15 @@ end
 function Guided.ScaleDropdown()
   if DropDownList1 then DropDownList1:SetScale(0.8) end
   if DropDownList2 then DropDownList2:SetScale(0.8) end
+end
+
+-- we shrink the shared dropdown frame for our menu; restore it on close so other
+-- addons'/Blizzard's right-click menus aren't left scaled down.
+local origCloseDropDownMenus = CloseDropDownMenus
+function CloseDropDownMenus(level)
+  if DropDownList1 then DropDownList1:SetScale(1) end
+  if DropDownList2 then DropDownList2:SetScale(1) end
+  if origCloseDropDownMenus then return origCloseDropDownMenus(level) end
 end
 
 -- open the cog dropdown. A stepIndex (from a right-clicked row) adds a

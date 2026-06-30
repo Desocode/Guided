@@ -581,7 +581,7 @@ function Guided.SetStep(i, dir)
   -- going back: clear manual radio ticks on the steps you've left. Auto-tracked
   -- objectives re-derive on render, so only genuinely manual ticks reset.
   if i < prev then
-    for j = i + 1, n do
+    for j = i, n do
       local sj = Guided.active[j]
       if sj and sj.elements then
         for e = 1, table.getn(sj.elements) do sj.elements[e].checked = nil end
@@ -705,6 +705,7 @@ local PIN_MAX        = 8    -- hard safety cap on grouped markers
 
 function Guided.UpdateWorldMapPins()
   for i = 1, table.getn(mapPins) do mapPins[i]:Hide() end
+  if Guided_Save.mappins == false then return end
   if not WorldMapFrame or not WorldMapFrame:IsVisible() then return end
   local shown = DisplayedZoneName()
   if not shown then return end                              -- continent/world view: no pins
@@ -2715,34 +2716,38 @@ local function CreateOptions()
     function() return Guided_Save.minimap ~= false end,
     function(v) Guided_Save.minimap = v; Guided.UpdateMinimapButton() end,
     "Add a button on the minimap. Left-click toggles the guide, right-click opens the menu.")
-  MakeCheck(pG, "GuidedOptArrow", "Show waypoint arrow", -62,
-    function() return Guided_Save.arrow end,
-    function(v) Guided_Save.arrow = v end,
-    "Show the on-screen arrow pointing to the current step's location.")
-  MakeCheck(pG, "GuidedOptLock", "Lock frames", -90,
+  MakeCheck(pG, "GuidedOptLock", "Lock frames", -62,
     function() return Guided_Save.locked end,
     function(v) Guided_Save.locked = v end,
     "Prevent the guide window from being moved or resized.")
-  MakeCheck(pG, "GuidedOptTracker", "Enable leveling tracker", -118,
+  MakeCheck(pG, "GuidedOptTracker", "Enable leveling tracker", -90,
     function() return Guided_Save.tracker end,
     function(v) Guided_Save.tracker = v; Guided.ApplyTracker() end,
     "Show experience per hour, time spent on this level, and estimated time to level.")
-  MakeCheck(pG, "GuidedOptFly", "Auto-take flight paths", -146,
+  MakeCheck(pG, "GuidedOptFly", "Auto-take flight paths", -118,
     function() return Guided_Save.autofly ~= false end,
     function(v) Guided_Save.autofly = v end,
     "When you open a flight master, automatically fly to the step's destination.")
 
   -- ---------- Display ----------
-  MakeCheck(pD, "GuidedOptHideDone", "Hide completed steps", -6,
-    function() return Guided_Save.hidedone end,
-    function(v) Guided_Save.hidedone = v; Guided.UpdateUI() end,
-    "Remove finished steps from the list instead of greying them out.")
-  MakeCheck(pD, "GuidedOptMMPins", "Minimap step pins", -34,
+  MakeCheck(pD, "GuidedOptArrow", "Show waypoint arrow", -6,
+    function() return Guided_Save.arrow end,
+    function(v) Guided_Save.arrow = v end,
+    "Show the on-screen arrow pointing to the current step's location.")
+  MakeCheck(pD, "GuidedOptMapPins", "World map pins", -34,
+    function() return Guided_Save.mappins ~= false end,
+    function(v) Guided_Save.mappins = v; if Guided.UpdateWorldMapPins then Guided.UpdateWorldMapPins() end end,
+    "Show numbered pins for upcoming steps on the world map.")
+  MakeCheck(pD, "GuidedOptMMPins", "Minimap step pins", -62,
     function() return Guided_Save.minimappins ~= false end,
     function(v) Guided_Save.minimappins = v; if Guided.UpdateMinimapPins then Guided.UpdateMinimapPins() end end,
     "Show numbered pins for nearby upcoming steps on the minimap.")
+  MakeCheck(pD, "GuidedOptHideDone", "Hide completed steps", -90,
+    function() return Guided_Save.hidedone end,
+    function(v) Guided_Save.hidedone = v; Guided.UpdateUI() end,
+    "Remove finished steps from the list instead of greying them out.")
   local slbl = pD:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  slbl:SetPoint("TOPLEFT", pD, "TOPLEFT", 16, -62); slbl:SetText("Window scale")
+  slbl:SetPoint("TOPLEFT", pD, "TOPLEFT", 16, -120); slbl:SetText("Window scale")
   local s = CreateFrame("EditBox", "GuidedOptScale", pD, "InputBoxTemplate")
   s:SetWidth(46); s:SetHeight(20); s:SetPoint("LEFT", slbl, "RIGHT", 14, 0)
   s:SetAutoFocus(false); s:SetMaxLetters(5)
@@ -2764,7 +2769,7 @@ local function CreateOptions()
     this:SetText(string.format("%.3g", Guided_Save.scale or 1)); this:ClearFocus()
   end)
   local op = CreateFrame("Slider", "GuidedOptOpacity", pD, "OptionsSliderTemplate")
-  op:SetWidth(300); op:SetHeight(16); op:SetPoint("TOP", pD, "TOP", 0, -110)
+  op:SetWidth(300); op:SetHeight(16); op:SetPoint("TOP", pD, "TOP", 0, -160)
   op:SetMinMaxValues(0, 1); op:SetValueStep(0.05)
   getglobal("GuidedOptOpacityLow"):SetText("0")
   getglobal("GuidedOptOpacityHigh"):SetText("1")
@@ -2898,6 +2903,7 @@ function Guided.ToggleOptions(tab)
   if GuidedOptFly then GuidedOptFly:SetChecked(Guided_Save.autofly ~= false) end
   if GuidedOptHideDone then GuidedOptHideDone:SetChecked(Guided_Save.hidedone == true) end
   if GuidedOptMMPins then GuidedOptMMPins:SetChecked(Guided_Save.minimappins ~= false) end
+  if GuidedOptMapPins then GuidedOptMapPins:SetChecked(Guided_Save.mappins ~= false) end
   if GuidedOptSkipOver then GuidedOptSkipOver:SetChecked(Guided_Save.skipoverlevel ~= false) end
   if GuidedOptHardcore then GuidedOptHardcore:SetChecked(Guided_Save.hardcore == true) end
   if GuidedOptGroup then GuidedOptGroup:SetChecked(Guided_Save.groupquests == true) end
@@ -2961,6 +2967,7 @@ local function Defaults()
   if Guided_Save.doneQuests == nil then Guided_Save.doneQuests = {} end  -- [questId]=true: observed hand-ins
   if Guided_Save.minimap == nil then Guided_Save.minimap = true end
   if Guided_Save.minimappins == nil then Guided_Save.minimappins = true end
+  if Guided_Save.mappins == nil then Guided_Save.mappins = true end
   if Guided_Save.splits == nil then Guided_Save.splits = {} end
   if Guided_Save.tracker == nil then Guided_Save.tracker = false end
   if Guided_Save.autofly == nil then Guided_Save.autofly = true end

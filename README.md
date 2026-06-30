@@ -50,4 +50,5 @@ AddOns**. No other addons required.
 - `/guided detect` — auto-pick a guide for your class/level
 - `/guided options` — settings · `/guided auto` — toggle quest automation
 - `/guided next` · `prev` · `reset` · `import` · `dungeons` · `tracker` · `minimap`
+- `/guided changelog` — recent changes (full history in [CHANGELOG.md](CHANGELOG.md))
 - Right-click the minimap button (or the window cog) for the menu

@@ -3367,6 +3367,17 @@ function ConfirmBinder()
   if Guided.SkipForward then Guided.SkipForward() end
 end
 
+-- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
+Guided.VERSION = "1.29"
+Guided.changelog = {
+  { "1.29", "This /guided changelog command + CHANGELOG.md" },
+  { "1.28", ".home / .hs steps auto-advance (set hearth / hearth home)" },
+  { "1.27", "Fix auto-advance on same-named accept + turn-in steps" },
+  { "1.26", "Cluster overlapping minimap pins" },
+  { "1.25", "Polish: unnumbered sticky pins, #optional, timer, dropdown" },
+  { "1.24", "Conditional gating: .zone/.itemcount/.money + #requires/#loop" },
+}
+
 -- ----------------------------------------------------------------- slash ----
 SLASH_GUIDED1 = "/guided"
 SLASH_GUIDED2 = "/gd"
@@ -3381,6 +3392,11 @@ SlashCmdList["GUIDED"] = function(msg)
   elseif cmd == "minimap" then
     Guided_Save.minimap = (Guided_Save.minimap == false); Guided.UpdateMinimapButton()
     Print("Minimap button "..(Guided_Save.minimap ~= false and "shown" or "hidden"))
+  elseif cmd == "changelog" or cmd == "changes" or cmd == "cl" then
+    Print("v"..Guided.VERSION.." -- recent changes (full history in CHANGELOG.md):")
+    for i = 1, table.getn(Guided.changelog) do
+      DEFAULT_CHAT_FRAME:AddMessage("  |cffffd200"..Guided.changelog[i][1].."|r  "..Guided.changelog[i][2])
+    end
   elseif cmd == "options" or cmd == "config" or cmd == "opt" then Guided.ToggleOptions()
   elseif cmd == "dungeons" then Guided.ShowDungeons()
   elseif cmd == "import" then

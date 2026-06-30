@@ -2463,7 +2463,7 @@ local function CreateMinimapButton()
   b:RegisterForDrag("LeftButton")
   local icon = b:CreateTexture(nil, "BACKGROUND")
   icon:SetWidth(18); icon:SetHeight(18); icon:SetPoint("CENTER", b, "CENTER", 0, 1)
-  icon:SetTexture("Interface\\Icons\\Spell_Nature_Sentinal")   -- owl (nature)
+  icon:SetTexture("Interface\\Icons\\INV_Gizmo_GoblinBoomBox_01")   -- boombox
   icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)                  -- trim border to fit the ring
   local ring = b:CreateTexture(nil, "OVERLAY")
   ring:SetWidth(53); ring:SetHeight(53); ring:SetPoint("TOPLEFT", b, "TOPLEFT", 0, 0)

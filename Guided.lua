@@ -598,11 +598,15 @@ function Guided.SetStep(i, dir)
       end
     end
   end
-  -- drop any sticky no longer relevant for the new current step
-  if Guided.activeStickies then
-    for idx in pairs(Guided.activeStickies) do
-      if not Guided.StickyShouldPin(idx, log) then Guided.activeStickies[idx] = nil end
-    end
+  -- reconcile stickies for the new current step: (re)pin relevant side-steps
+  -- behind it (e.g. the kill sticky when you navigate back), then drop stale ones.
+  Guided.activeStickies = Guided.activeStickies or {}
+  for j = 1, i - 1 do
+    local sp = Guided.active[j]
+    if sp and sp.sticky and Guided.StickyShouldPin(j, log) then Guided.activeStickies[j] = true end
+  end
+  for idx in pairs(Guided.activeStickies) do
+    if not Guided.StickyShouldPin(idx, log) then Guided.activeStickies[idx] = nil end
   end
   Guided.UpdateUI()
 end

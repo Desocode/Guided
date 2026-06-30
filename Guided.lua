@@ -3046,8 +3046,16 @@ function Guided.AutoSelectGuide()
   return best or Guided.guideOrder[1]
 end
 
+-- a brand-new character: still level 1 with no XP earned yet. Only these get a
+-- guide auto-picked on login; everyone else keeps their saved guide (and progress)
+-- or chooses one manually (cog menu / /guided detect).
+function Guided.IsNewCharacter()
+  return (UnitLevel("player") or 1) <= 1 and (UnitXP("player") or 0) == 0
+end
+
 local function SelectDefaultGuide()
-  if Guided_Save.guide and Guided.guides[Guided_Save.guide] then return end
+  if Guided_Save.guide and Guided.guides[Guided_Save.guide] then return end  -- keep saved guide + its progress
+  if not Guided.IsNewCharacter() then return end                            -- don't auto-force a guide on existing chars
   local best = Guided.AutoSelectGuide()
   if best then
     Guided_Save.guide = best

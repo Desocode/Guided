@@ -2295,6 +2295,13 @@ function Guided.MenuInit()
   end
 end
 
+-- the dropdown opens at full UI scale and looks oversized next to the ~0.8-scaled
+-- guide window, so shrink it to match.
+function Guided.ScaleDropdown()
+  if DropDownList1 then DropDownList1:SetScale(0.8) end
+  if DropDownList2 then DropDownList2:SetScale(0.8) end
+end
+
 -- open the cog dropdown. A stepIndex (from a right-clicked row) adds a
 -- "Go to step N" entry at the top, alongside the Options/Guides menu.
 function Guided.OpenMenu(stepIndex, anchor)
@@ -2306,6 +2313,7 @@ function Guided.OpenMenu(stepIndex, anchor)
   -- stale menu first so re-opening never stacks frames.
   CloseDropDownMenus()
   ToggleDropDownMenu(1, nil, GuidedMenu, "GuidedFrameCog", 0, 0)
+  Guided.ScaleDropdown()
 end
 
 function Guided.ToggleMenu()
@@ -2471,8 +2479,13 @@ local function CreateMinimapButton()
   b:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
   b:SetScript("OnClick", function()
     if arg1 == "RightButton" then
-      Guided.menuStep = nil; CloseDropDownMenus()
-      if GuidedMenu then ToggleDropDownMenu(1, nil, GuidedMenu, "GuidedMinimapButton", 0, 0) end
+      if DropDownList1 and DropDownList1:IsVisible() and UIDROPDOWNMENU_OPEN_MENU == GuidedMenu then
+        CloseDropDownMenus()                         -- already open -> right-click again closes it
+      elseif GuidedMenu then
+        Guided.menuStep = nil
+        ToggleDropDownMenu(1, nil, GuidedMenu, "GuidedMinimapButton", 0, 0)
+        Guided.ScaleDropdown()
+      end
     else
       Guided.Toggle()
     end

@@ -547,6 +547,7 @@ function Guided.SetStep(i, dir)
   if not Guided.active then return end
   local n = table.getn(Guided.active)
   if n == 0 then return end
+  local prev = Guided_Save.step or 1
   if i < 1 then i = 1 end
   if i > n then i = n end
   -- the current step is never a sticky side-step nor an already-done step
@@ -577,6 +578,22 @@ function Guided.SetStep(i, dir)
     else break end
   end
   Guided_Save.step = i
+  -- going back: clear manual radio ticks on the steps you've left. Auto-tracked
+  -- objectives re-derive on render, so only genuinely manual ticks reset.
+  if i < prev then
+    for j = i + 1, n do
+      local sj = Guided.active[j]
+      if sj and sj.elements then
+        for e = 1, table.getn(sj.elements) do sj.elements[e].checked = nil end
+      end
+    end
+  end
+  -- drop any sticky no longer relevant for the new current step
+  if Guided.activeStickies then
+    for idx in pairs(Guided.activeStickies) do
+      if not Guided.StickyShouldPin(idx, log) then Guided.activeStickies[idx] = nil end
+    end
+  end
   Guided.UpdateUI()
 end
 
@@ -1218,7 +1235,7 @@ end
 -- a pinned sticky should drop once it's done OR the current step has advanced past
 -- the step it completes with (its window closed). Without this an orphaned side-step
 -- lingers while you're already several steps ahead (e.g. after abandoning a quest).
-local function StickyShouldPin(idx, log)
+function Guided.StickyShouldPin(idx, log)
   if Guided.StepDoneByIndex(idx, log) then return false end
   local s = Guided.active and Guided.active[idx]
   if not s then return false end
@@ -1241,6 +1258,20 @@ local function StickyShouldPin(idx, log)
     end
     if hasComplete and not onAny then return false end
   end
+  -- redundant once the current (non-sticky) step covers the SAME objective -- e.g.
+  -- the dedicated kill step after a sticky kill of the same mobs.
+  local cur = Guided.active[Guided_Save.step or 1]
+  if cur and cur ~= s and not cur.sticky and cur.quests and s.quests then
+    for a = 1, table.getn(s.quests) do
+      local sq = s.quests[a]
+      if sq.action == "complete" then
+        for b = 1, table.getn(cur.quests) do
+          local cq = cur.quests[b]
+          if cq.action == "complete" and cq.id == sq.id and cq.obj == sq.obj then return false end
+        end
+      end
+    end
+  end
   return true
 end
 
@@ -1252,7 +1283,7 @@ function Guided.SkipForward()
 
   -- unpin any sticky that's done or whose completion window has passed
   for idx in pairs(Guided.activeStickies) do
-    if not StickyShouldPin(idx, log) then Guided.activeStickies[idx] = nil end
+    if not Guided.StickyShouldPin(idx, log) then Guided.activeStickies[idx] = nil end
   end
 
   -- (re)pin sticky side-steps behind the current step that are still relevant.
@@ -1261,7 +1292,7 @@ function Guided.SkipForward()
   local cur0 = Guided_Save.step or 1
   for i = 1, cur0 - 1 do
     local sp = Guided.active[i]
-    if sp and sp.sticky and StickyShouldPin(i, log) then
+    if sp and sp.sticky and Guided.StickyShouldPin(i, log) then
       Guided.activeStickies[i] = true
     end
   end

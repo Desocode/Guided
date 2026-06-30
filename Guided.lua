@@ -2463,7 +2463,7 @@ local function CreateMinimapButton()
   b:RegisterForDrag("LeftButton")
   local icon = b:CreateTexture(nil, "BACKGROUND")
   icon:SetWidth(18); icon:SetHeight(18); icon:SetPoint("CENTER", b, "CENTER", 0, 1)
-  icon:SetTexture("Interface\\Icons\\INV_Enchant_FormulaSuperior_01")   -- green scroll/formula
+  icon:SetTexture("Interface\\Icons\\INV_Scroll_03")   -- scroll (guide)
   icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)                  -- trim border to fit the ring
   local ring = b:CreateTexture(nil, "OVERLAY")
   ring:SetWidth(53); ring:SetHeight(53); ring:SetPoint("TOPLEFT", b, "TOPLEFT", 0, 0)

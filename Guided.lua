@@ -1661,11 +1661,11 @@ function Guided.StepDoneByIndex(i, log, depth)
     local target
     if s.completewith == "next" then target = i + 1
     else target = Guided.labelIndex and Guided.labelIndex[s.completewith] end
-    if target and target ~= i then
-      return Guided.StepDoneByIndex(target, log, depth)
+    if target and target ~= i and Guided.StepDoneByIndex(target, log, depth) then
+      return true                                    -- the step it completes-with is done
     end
   end
-  return Guided.IsStepDone(s, log)
+  return Guided.IsStepDone(s, log)                   -- else: done when THIS step's own objective is (e.g. 6/6 fangs)
 end
 
 -- advance past every consecutive already-completed step (handles auto-advance,
@@ -3973,8 +3973,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.46"
+Guided.VERSION = "1.47"
 Guided.changelog = {
+  { "1.47", "#completewith side-steps clear when their OWN objective is done (e.g. 6/6 fangs), not only at the target" },
   { "1.46", "Complete a .complete step when the whole quest reads complete (flaky per-objective read)" },
   { "1.45", "Cross-zone direction arrow (points toward targets in other zones; bundled Astrolabe data)" },
   { "1.44", "Unlabeled .collect steps name the item (GetItemInfo) instead of \"Collect the listed items\"" },

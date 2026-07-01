@@ -3,6 +3,13 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.47
+- `#completewith` side-steps now clear when their **own** objective completes, not only when
+  the step they're tied to is reached. A "kill Moonstalker Runts for 6 Fangs" side-step
+  (`#completewith AsterionTravel`) stayed pinned at 6/6 because completion was decided *solely*
+  by whether AsterionTravel was done. It now completes when either its own objective is done or
+  the target is reached — matching RXP.
+
 ## 1.46
 - A `.complete <quest>,<objective>` step now clears when the **whole quest** reads complete,
   not just when the per-objective progress read says so. If you'd finished an (optional) quest —

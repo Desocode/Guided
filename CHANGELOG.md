@@ -3,6 +3,12 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.32
+- `#optional` steps no longer block auto-advance. Optional steps (e.g. repeatable grinds
+  like the "The Family and the Fishing Pole" grouper turn-in at Gubber Blump) are now
+  flowed past automatically instead of parking the guide on them, matching RXP's behavior.
+  They're still reachable with **Back** if you want to do them.
+
 ## 1.31
 - `.fly` (flight-path) steps now complete on **arrival at the destination**. Previously a
   flight step had no trackable objective, so a guide ending in one (e.g. Teldrassil's "Fly to

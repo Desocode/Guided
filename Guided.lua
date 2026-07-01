@@ -140,6 +140,25 @@ end
 -- a per-line "<< cond" passes if absent, or its condition matches this character
 local function CondOK(c) return (not c) or Guided.EvalCondition(c) end
 
+-- does a step have any real, visible content for THIS character? False when every line is
+-- filtered out by its "<<" condition (leaving at most the faint "(optional)" marker) or the
+-- step is empty. Content-less steps are auto-advanced and not pinned on the map/minimap.
+function Guided.StepHasContent(step)
+  if not step then return false end
+  if step.elements then
+    for j = 1, table.getn(step.elements) do
+      local e = step.elements[j]
+      if not e.marker and CondOK(e.cond) then return true end
+    end
+  end
+  if step.quests then
+    for k = 1, table.getn(step.quests) do
+      if CondOK(step.quests[k].cond) then return true end
+    end
+  end
+  return false
+end
+
 -- build the list of steps that apply to this character (after << filtering)
 -- weave dungeons: a step ".dungeon X" shows only if X is enabled; ".dungeon !X"
 -- / ".dungeonskip X" (the solo-path alternative) is hidden when X is enabled.
@@ -892,6 +911,7 @@ function Guided.UpdateWorldMapPins()
   local pts = {}
   local function consider(ai)
     local st = active[ai]; if not st or not st.gotos then return end
+    if not Guided.StepHasContent(st) then return end             -- content-less step: nothing to pin
     for gi = 1, table.getn(st.gotos) do                          -- a pin per goto (both NPCs of a 2-NPC step)
       local zone, _, tx, ty = ParseGoto(st.gotos[gi])
       if zone and tx and ty and normalize(zone) == snorm then
@@ -1255,6 +1275,7 @@ function Guided.UpdateMinimapPins()
   local pts = {}
   local function consider(ai)
     local st = active[ai]; if not st or not st.gotos then return end
+    if not Guided.StepHasContent(st) then return end             -- content-less step: nothing to pin
     for gi = 1, table.getn(st.gotos) do                          -- a pin per goto (both NPCs of a 2-NPC step)
       if table.getn(pts) >= 12 then return end
       local zone, _, tx, ty = ParseGoto(st.gotos[gi])
@@ -1503,19 +1524,7 @@ function Guided.IsStepDone(step, log)
   -- no real visible content for this character -- all elements filtered out by their <<
   -- conditions (leaving at most the faint "(optional)" marker), or none at all. There's
   -- nothing to show or do, so auto-advance -- RXP treats an element-less step as complete.
-  local hasVisible = false
-  if step.elements then
-    for j = 1, table.getn(step.elements) do
-      local e = step.elements[j]
-      if not e.marker and CondOK(e.cond) then hasVisible = true; break end
-    end
-  end
-  if not hasVisible then                                    -- also keep any step with an applicable quest objective
-    for k = 1, table.getn(step.quests) do
-      if CondOK(step.quests[k].cond) then hasVisible = true; break end
-    end
-  end
-  if not hasVisible then return true end
+  if not Guided.StepHasContent(step) then return true end
   if table.getn(step.quests) == 0 then return false end
   if not log then return false end
   local any = false
@@ -3903,8 +3912,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.39"
+Guided.VERSION = "1.40"
 Guided.changelog = {
+  { "1.40", "Map & minimap no longer pin content-less steps (shared with the auto-skip logic)" },
   { "1.39", "Auto-skip content-less steps (all content filtered) instead of showing a bare checkbox" },
   { "1.38", "Fix side-steps piling up: #completewith windows now close for filtered/dangling targets" },
   { "1.37", "Side-steps respect their gates now (fixes 'Abandon Bashal'Aran' always showing)" },

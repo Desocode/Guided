@@ -3,6 +3,11 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.40
+- World-map and minimap pins now skip content-less steps too. The auto-skip test from 1.39 is
+  shared with the pin logic, so a step whose content is entirely filtered out for your character
+  no longer drops a stray waypoint on the map or minimap.
+
 ## 1.39
 - Steps with no visible content for your character now auto-advance instead of showing as a
   bare checkbox. If every line of a step is filtered out by its `<<` condition (leaving only the

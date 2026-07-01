@@ -3,6 +3,13 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.36
+- `#completewith` steps are now treated as **pinned side-steps** (sticky), matching RXP.
+  Only an explicit `#sticky` was being made sticky, so the ~390 `#completewith` side-steps
+  were shown as **main** steps — e.g. "Kill Moonkin for their Small Eggs" (`#completewith
+  RedCrystal`) appeared as a main step and, because its completion is tied to a later step,
+  blocked the flow. They now pin alongside the current step and clear when their window passes.
+
 ## 1.35
 - Fixed same-name quest chains skipping ahead. Several quests can share one title (the
   Bashal'Aran chain, 954–957, are all "Bashal'Aran"); the turn-in check was name-based, so

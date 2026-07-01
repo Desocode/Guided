@@ -553,6 +553,9 @@ function Guided.ParseLine(step, t)
           if not step.completewith then kind = "level"; etext = disp or ("Reach level "..(val or "?")) end
         elseif key == "optional" then
           step.optional = true; kind = "note"; etext = "|cff888888(optional)|r"
+        elseif key == "completewith" then
+          step.completewith = (val ~= "" and val) or true
+          if not step.tip then step.sticky = true end   -- a #completewith step is a pinned side-step, not a main step (matches RXP)
         else
           step[key] = (val ~= "" and val) or true
         end
@@ -3866,8 +3869,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.35"
+Guided.VERSION = "1.36"
 Guided.changelog = {
+  { "1.36", "#completewith steps are pinned side-steps now (were wrongly shown as main)" },
   { "1.35", "Fix same-name chains (Bashal'Aran) skipping; handle guide-instructed .abandon" },
   { "1.34", "/guided why -- diagnose why the current step isn't auto-completing" },
   { "1.33", "Revert 1.32: optional steps no longer auto-skip (it blew past wanted content on relog)" },

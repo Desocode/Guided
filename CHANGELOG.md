@@ -3,6 +3,13 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.37
+- Sticky/side-steps now respect their **quest-state gates** (`.isQuestAvailable`, `.isOnQuest`,
+  `.isQuestComplete`, …). Previously the pin path skipped `StepGateMet`, so a gated side-step
+  showed unconditionally — e.g. the "Abandon Bashal'Aran" side-step (`.isQuestAvailable 955`)
+  pinned even when its condition wasn't met. (More noticeable after 1.36 made `#completewith`
+  steps sticky.)
+
 ## 1.36
 - `#completewith` steps are now treated as **pinned side-steps** (sticky), matching RXP.
   Only an explicit `#sticky` was being made sticky, so the ~390 `#completewith` side-steps

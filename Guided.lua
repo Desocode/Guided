@@ -1698,6 +1698,7 @@ function Guided.StickyShouldPin(idx, log)
   local s = Guided.active and Guided.active[idx]
   if not s then return false end
   if StickySkipped(s) then return false end                  -- manually dismissed
+  if log and not Guided.StepGateMet(s, log) then return false end   -- quest-state gate (.isQuestAvailable/.isOnQuest/...) not met
   if Guided.StepDoneByIndex(idx, log) then return false end
   if s.completewith and s.completewith ~= true then
     local t = (s.completewith == "next") and (idx + 1)
@@ -1763,8 +1764,9 @@ function Guided.SkipForward()
     local i = Guided_Save.step or 1
     local s = Guided.active[i]
     if s and s.sticky then
-      -- pin it (unless already satisfied) and step over it
-      if Guided.StepDoneByIndex(i, log) then Guided.RecordDone(s) else Guided.activeStickies[i] = true end
+      -- pin it (if its gate is met and it's not already satisfied) and step over it
+      if Guided.StepDoneByIndex(i, log) then Guided.RecordDone(s)
+      elseif Guided.StickyShouldPin(i, log) then Guided.activeStickies[i] = true end
       Guided_Save.step = i + 1
     elseif Guided.StepDoneByIndex(i, log) then
       Guided.RecordDone(s)                 -- auto-completed -> remember across reloads
@@ -3869,8 +3871,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.36"
+Guided.VERSION = "1.37"
 Guided.changelog = {
+  { "1.37", "Side-steps respect their gates now (fixes 'Abandon Bashal'Aran' always showing)" },
   { "1.36", "#completewith steps are pinned side-steps now (were wrongly shown as main)" },
   { "1.35", "Fix same-name chains (Bashal'Aran) skipping; handle guide-instructed .abandon" },
   { "1.34", "/guided why -- diagnose why the current step isn't auto-completing" },

@@ -1765,8 +1765,6 @@ function Guided.SkipForward()
       Guided_Save.step = i + 1
     elseif s and not Guided.StepGateMet(s, log) then
       Guided_Save.step = i + 1             -- quest-state gate not met -> skip (not "done")
-    elseif s and s.optional then
-      Guided_Save.step = i + 1             -- #optional: never blocks the flow (matches RXP); still reachable via Back
     else
       break
     end
@@ -3850,9 +3848,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.32"
+Guided.VERSION = "1.33"
 Guided.changelog = {
-  { "1.32", "#optional steps no longer block auto-advance (matches RXP)" },
+  { "1.33", "Revert 1.32: optional steps no longer auto-skip (it blew past wanted content on relog)" },
   { "1.31", ".fly steps complete on arrival -- fixes guides not auto-chaining to the next zone" },
   { "1.30", "#displayname support (e.g. Darkshore shows as 11-16 for Night Elves)" },
   { "1.29", "This /guided changelog command + CHANGELOG.md" },

@@ -1472,6 +1472,11 @@ function Guided.IsStepDone(step, log)
     local b = lc(GetBindLocation() or "")
     if b ~= "" and (lc(GetRealZoneText() or "") == b or lc(GetSubZoneText() or "") == b) then return true end
   end
+  if step.fly and table.getn(step.quests) == 0 then                  -- .fly: travel step, done on arrival at the destination
+    local d = lc(step.fly)
+    if d ~= "" and (lc(GetRealZoneText() or "") == d or lc(GetZoneText() or "") == d
+                    or lc(GetSubZoneText() or "") == d) then return true end
+  end
   if step.level and UnitLevel("player") >= step.level then return true end
   if step.xpGate and Guided.XpGateMet(step.xpGate) then
     -- plain grind (no skipstep) and reverse gates always complete at threshold; a forward
@@ -3843,8 +3848,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.30"
+Guided.VERSION = "1.31"
 Guided.changelog = {
+  { "1.31", ".fly steps complete on arrival -- fixes guides not auto-chaining to the next zone" },
   { "1.30", "#displayname support (e.g. Darkshore shows as 11-16 for Night Elves)" },
   { "1.29", "This /guided changelog command + CHANGELOG.md" },
   { "1.28", ".home / .hs steps auto-advance (set hearth / hearth home)" },

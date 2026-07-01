@@ -3,6 +3,12 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.31
+- `.fly` (flight-path) steps now complete on **arrival at the destination**. Previously a
+  flight step had no trackable objective, so a guide ending in one (e.g. Teldrassil's "Fly to
+  Darkshore") never counted as finished and never auto-chained to the next zone's guide. This
+  fixes flight-based `#next` transitions across all guides.
+
 ## 1.30
 - Support `#displayname` (per-class/race guide names). Guides now show their intended
   name for your character — e.g. the Darkshore segment displays as **"11-16 Darkshore"**

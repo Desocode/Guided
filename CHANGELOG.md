@@ -3,6 +3,14 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.38
+- Fixed side-steps piling up (many showing at once). A `#completewith` side-step closes when
+  the guide passes its target step, but our target lookup only covered *active* steps — so any
+  side-step whose target was filtered out for your character (SoD steps, other class/race) or was
+  a dangling label never closed and pinned forever, accumulating as you progressed. Targets are
+  now resolved against the full step list (filtered targets map to the next active step), matching
+  RXP; note-only side-steps with a truly missing target no longer pin at all.
+
 ## 1.37
 - Sticky/side-steps now respect their **quest-state gates** (`.isQuestAvailable`, `.isOnQuest`,
   `.isQuestComplete`, …). Previously the pin path skipped `StepGateMet`, so a gated side-step

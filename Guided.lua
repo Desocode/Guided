@@ -219,7 +219,11 @@ end
 
 function Guided.BuildActive()
   Guided.active = {}
-  Guided.labelIndex = {}      -- step #label -> index in active (for #completewith <label>)
+  Guided.labelIndex = {}      -- step #label -> index in active (exact; for #requires / navigation)
+  Guided.labelPos = {}        -- step #label -> active position for #completewith windows; labels on
+                              -- filtered-out steps (SoD/other class/race) map to the NEXT active
+                              -- position so a side-step's window still closes (RXP resolves against
+                              -- the full step list; without this those side-steps pin forever)
   Guided.activeStickies = {}  -- index -> true: sticky steps pinned & not yet done
   Guided.dungeonCodes = {}    -- distinct dungeon codes present in this guide (for the picker)
   Guided.skillMap = Guided.BuildSkillMap()
@@ -236,7 +240,12 @@ function Guided.BuildActive()
         and Guided.SkillCheck(st) and SeasonOK(st) and XpRateOK(st) and ModeOK(st) and GroupCheck(st) and StepClientOK(st) then
       tinsert(Guided.active, st)
       local s = Guided.active[table.getn(Guided.active)]
-      if s.label and s.label ~= true then Guided.labelIndex[s.label] = table.getn(Guided.active) end
+      if s.label and s.label ~= true then
+        Guided.labelIndex[s.label] = table.getn(Guided.active)
+        Guided.labelPos[s.label] = table.getn(Guided.active)
+      end
+    elseif st.label and st.label ~= true and not Guided.labelPos[st.label] then
+      Guided.labelPos[st.label] = table.getn(Guided.active) + 1   -- filtered-out label -> next active pos
     end
   end
   table.sort(Guided.dungeonCodes)
@@ -1702,8 +1711,15 @@ function Guided.StickyShouldPin(idx, log)
   if Guided.StepDoneByIndex(idx, log) then return false end
   if s.completewith and s.completewith ~= true then
     local t = (s.completewith == "next") and (idx + 1)
-              or (Guided.labelIndex and Guided.labelIndex[s.completewith])
-    if t and (Guided_Save.step or 1) > t then return false end   -- past its completion window
+              or (Guided.labelPos and Guided.labelPos[s.completewith])
+    if not t then
+      -- target label doesn't exist anywhere (dangling, e.g. MeatFangEgg1): no window anchor.
+      -- keep pinned only if the step has its own completable objective; a note-only side-step
+      -- would otherwise linger forever and pile up.
+      if not (s.quests and table.getn(s.quests) > 0) then return false end
+    elseif (Guided_Save.step or 1) > t then
+      return false                                            -- past its completion window
+    end
   end
   -- a kill/collect sticky for a quest you're no longer on (abandoned) can't progress,
   -- so don't keep it pinned. (Unknown quest id -> fail open and keep it.)
@@ -3871,8 +3887,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.37"
+Guided.VERSION = "1.38"
 Guided.changelog = {
+  { "1.38", "Fix side-steps piling up: #completewith windows now close for filtered/dangling targets" },
   { "1.37", "Side-steps respect their gates now (fixes 'Abandon Bashal'Aran' always showing)" },
   { "1.36", "#completewith steps are pinned side-steps now (were wrongly shown as main)" },
   { "1.35", "Fix same-name chains (Bashal'Aran) skipping; handle guide-instructed .abandon" },

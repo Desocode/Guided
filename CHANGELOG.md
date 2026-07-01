@@ -3,6 +3,13 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.45
+- **Cross-zone direction arrow.** When a step's target is in another zone (e.g. "Talk to Landria"
+  in Darnassus while you're in Darkshore), the arrow now points *toward* it using bundled
+  vanilla world-coordinate data (Astrolabe, from Questie — LGPL). Zones whose map-file name
+  doesn't cleanly match still fall back to the "> Zone" hint, and different-continent targets
+  keep the hint (you can't point across the ocean). Purely additive — no in-zone change.
+
 ## 1.44
 - A `.collect` step with no author comment now names the item ("Collect [Heavy Recurve Bow]")
   instead of the generic "Collect the listed items". The item name is resolved from its ID via

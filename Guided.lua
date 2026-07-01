@@ -1117,6 +1117,43 @@ function Guided.ArrowGoto()
   return nil
 end
 
+-- ---- cross-zone/continent direction (Astrolabe world-coord data in Guided_ZonePos) ----
+-- Resolve a zone name (guide display name, or GetMapInfo map-file) to its ZonePos entry.
+-- ZonePos keys are Astrolabe map-file names (no spaces); a few differ from the display
+-- name, hence the alias table. Returns continent index (1/2) + {width,height,xOffset,yOffset}.
+local ZONE_ALIAS = { ["darnassus"]="Darnassis", ["the barrens"]="Barrens",
+  ["dustwallow marsh"]="Dustwallow", ["stormwind city"]="StormwindCity" }
+local function ZonePosLookup(name)
+  if not Guided_ZonePos or not name or name == "" then return nil end
+  local nk = lc(ZONE_ALIAS[lc(name)] or string.gsub(name, "%s+", ""))   -- alias, else strip spaces
+  for cont = 1, 2 do
+    local c = Guided_ZonePos[cont]
+    if c and c.zoneData then
+      for k, v in pairs(c.zoneData) do
+        if lc(k) == nk then return cont, v end
+      end
+    end
+  end
+  return nil
+end
+
+-- direction (deg, 0=N clockwise) + distance (yds) from the player to (targetZone, tx, ty in
+-- 0-100 map coords) when both are on the SAME continent; nil if unknown / different continent.
+function Guided.CrossZoneDir(targetZone, tx, ty)
+  local tcont, tz = ZonePosLookup(targetZone)
+  if not tz then return nil end
+  local pcont, pz = ZonePosLookup((GetMapInfo and GetMapInfo()) or GetRealZoneText() or "")
+  if not pz or pcont ~= tcont then return nil end
+  local px, py = GetPlayerMapPosition("player")
+  if (not px) or (px == 0 and py == 0) then return nil end
+  local ddx = (tx/100 * tz.width + tz.xOffset) - (px * pz.width + pz.xOffset)      -- yards, east+
+  local ddy = (ty/100 * tz.height + tz.yOffset) - (py * pz.height + pz.yOffset)    -- yards, south+
+  local dir = atan2(ddx, -(ddy))                       -- same convention as in-zone arrow, no 1.5 (yards isotropic)
+  dir = dir > 0 and (math.pi*2) - dir or -dir
+  if dir < 0 then dir = dir + 360 end
+  return dir, math.sqrt(ddx*ddx + ddy*ddy)
+end
+
 -- vanilla zone widths in yards (maps are a fixed 1.5:1 aspect, so height = w/1.5).
 -- Used to turn the map-percent delta into a real yard distance for the waypoint.
 local ZONE_YARDS = {
@@ -1210,22 +1247,25 @@ function Guided.ArrowUpdate(elapsed)
 
   if WorldMapFrame and not WorldMapFrame:IsVisible() then SetMapToCurrentZone() end
 
-  -- different zone than the player: can't point in-zone, show the destination
+  local dir, dist
   if zone and string.lower(zone) ~= string.lower(GetRealZoneText() or "") then
-    model:Show(); model:SetTexCoord(0, 0.109375, 0, 0.08203125)
-    txt:SetText("|cffffd200> "..zone.."|r"); return
+    -- different zone: point across zones using world coordinates (Astrolabe data)
+    dir, dist = Guided.CrossZoneDir(zone, tx, ty)
+    if not dir then                                       -- unknown zone / different continent: name the destination
+      model:Show(); model:SetTexCoord(0, 0.109375, 0, 0.08203125)
+      txt:SetText("|cffffd200> "..zone.."|r"); return
+    end
+  else
+    local px, py = GetPlayerMapPosition("player")
+    if px == 0 and py == 0 then model:Hide(); txt:SetText(""); return end
+    local ddx, ddy = tx - px*100, ty - py*100
+    local w = ZONE_YARDS[GetRealZoneText() or ""] or 3500   -- zone width in yards (default mid-size)
+    local yx, yy = ddx / 100 * w, ddy / 100 * (w / 1.5)     -- maps are 1.5:1
+    dist = math.sqrt(yx*yx + yy*yy)
+    dir = atan2(ddx*1.5, -(ddy))
+    dir = dir > 0 and (math.pi*2) - dir or -dir
+    if dir < 0 then dir = dir + 360 end
   end
-
-  local px, py = GetPlayerMapPosition("player")
-  if px == 0 and py == 0 then model:Hide(); txt:SetText(""); return end
-
-  local ddx, ddy = tx - px*100, ty - py*100
-  local w = ZONE_YARDS[GetRealZoneText() or ""] or 3500   -- zone width in yards (default mid-size)
-  local yx, yy = ddx / 100 * w, ddy / 100 * (w / 1.5)     -- maps are 1.5:1
-  local dist = math.sqrt(yx*yx + yy*yy)
-  local dir = atan2(ddx*1.5, -(ddy))
-  dir = dir > 0 and (math.pi*2) - dir or -dir
-  if dir < 0 then dir = dir + 360 end
   local angle = math.rad(dir) - GetPlayerFacing()
   local cell = mymod(math.floor(angle / (math.pi*2) * 108 + 0.5), 108)
   local column, row = mymod(cell, 9), math.floor(cell / 9)
@@ -3930,8 +3970,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.44"
+Guided.VERSION = "1.45"
 Guided.changelog = {
+  { "1.45", "Cross-zone direction arrow (points toward targets in other zones; bundled Astrolabe data)" },
   { "1.44", "Unlabeled .collect steps name the item (GetItemInfo) instead of \"Collect the listed items\"" },
   { "1.43", ".collect steps auto-complete once you hold enough of the item (fixes lingering gather side-steps)" },
   { "1.42", "Map pin tooltip lists each step once, not once per goto waypoint" },

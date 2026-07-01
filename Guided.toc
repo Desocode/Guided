@@ -2,10 +2,11 @@
 ## Title: Guided |cff33ff99Leveling Guide|r
 ## Notes: Lightweight, self-contained leveling guide for vanilla (1.12). By Deso.
 ## Author: Deso
-## Version: 1.44
+## Version: 1.45
 ## SavedVariablesPerCharacter: Guided_Save, RXP12_Save
 Data\QuestNames.lua
 Data\ZoneNames.lua
+Data\ZonePos.lua
 Guided.lua
 Guides\Classic-Alliance-1-13_Human.lua
 Guides\Classic-Alliance-1-10_NightElf.lua

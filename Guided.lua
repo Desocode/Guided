@@ -385,12 +385,13 @@ function Guided.ParseLine(step, t)
           end
         end
       elseif cmd == "collect" then
-        -- ".collect <id>,<count>[,...]" -- a loot/gather goal (text carried as a -- comment).
-        -- 1.12 gives no quest-id log tracking for these, so we can't auto-complete on count;
-        -- mark the step as carrying an objective so StepArrived won't skip it on arrival, and
-        -- surface the item note as a visible line.
+        -- ".collect <itemId>,<count>[,questId,obj,...]" -- a loot/gather goal. We can't track the
+        -- quest objective on 1.12, but we CAN count the item in your bags (GetItemCount), so the
+        -- step auto-completes once you hold <count> of it. Text carried as a -- comment.
         step.collect = true
         kind = "note"
+        local _, _, cid, ccount = string.find(rest, "^(%d+)%s*,%s*(%d+)")
+        if cid then step.collectItem = tonumber(cid); step.collectCount = tonumber(ccount) or 1 end
         if not etext then
           local _, _, cmt = string.find(rest, "%-%-%s*(.+)")
           etext = (cmt and trim(cmt) ~= "" and trim(cmt)) or "Collect the listed items"
@@ -1518,6 +1519,8 @@ function Guided.IsStepDone(step, log)
     if d ~= "" and (lc(GetRealZoneText() or "") == d or lc(GetZoneText() or "") == d
                     or lc(GetSubZoneText() or "") == d) then return true end
   end
+  if step.collectItem and table.getn(step.quests) == 0 and GetItemCount   -- .collect: done once you hold enough of the item
+     and GetItemCount(step.collectItem) >= (step.collectCount or 1) then return true end
   if step.level and UnitLevel("player") >= step.level then return true end
   if step.xpGate and Guided.XpGateMet(step.xpGate) then
     -- plain grind (no skipstep) and reverse gates always complete at threshold; a forward
@@ -3916,8 +3919,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.42"
+Guided.VERSION = "1.43"
 Guided.changelog = {
+  { "1.43", ".collect steps auto-complete once you hold enough of the item (fixes lingering gather side-steps)" },
   { "1.42", "Map pin tooltip lists each step once, not once per goto waypoint" },
   { "1.41", "Map pin tooltips show the real step text, not the faint (optional) marker" },
   { "1.40", "Map & minimap no longer pin content-less steps (shared with the auto-skip logic)" },

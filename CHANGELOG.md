@@ -3,6 +3,13 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.43
+- `.collect` gather side-steps now auto-complete once you hold enough of the item. They were
+  parsed as untracked notes, so a "collect 5 Strider Meat" side-step lingered its whole window
+  even when you already had the meat — and each section's copy churned in and out. We now count
+  the item with `GetItemCount` and complete the step at the target count (collect-only steps;
+  ones that also carry a quest objective still wait on it).
+
 ## 1.42
 - Map pin hover tooltip now lists each step once. A step with several `.goto` waypoints (e.g.
   "Kill Reef Crawlers", which marks a 9-point kill area) added one point per waypoint, so a pin

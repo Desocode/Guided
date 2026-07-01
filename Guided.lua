@@ -859,15 +859,18 @@ local function GetMapPin(i)
     if not this.steps then return end
     GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
     local steps = this.steps
-    local total = table.getn(steps)
-    local cap = total > 10 and 10 or total
-    for k = 1, cap do
+    local seen, shown = {}, 0                             -- one line per STEP, not per goto waypoint
+    for k = 1, table.getn(steps) do
       local p = steps[k]
-      GameTooltip:AddLine(p.num and ("Step "..p.num) or "Side step", 1, 0.82, 0)
-      local d = StepSummaryText(p.st)
-      if d ~= "" then GameTooltip:AddLine("  "..d, 0.9, 0.9, 0.9) end
+      if not seen[p.st] then
+        seen[p.st] = true
+        if shown >= 10 then GameTooltip:AddLine("...and more", 0.6, 0.6, 0.6); break end
+        shown = shown + 1
+        GameTooltip:AddLine(p.num and ("Step "..p.num) or "Side step", 1, 0.82, 0)
+        local d = StepSummaryText(p.st)
+        if d ~= "" then GameTooltip:AddLine("  "..d, 0.9, 0.9, 0.9) end
+      end
     end
-    if total > cap then GameTooltip:AddLine("...and "..(total - cap).." more", 0.6, 0.6, 0.6) end
     GameTooltip:Show()
   end)
   f:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -3913,8 +3916,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.41"
+Guided.VERSION = "1.42"
 Guided.changelog = {
+  { "1.42", "Map pin tooltip lists each step once, not once per goto waypoint" },
   { "1.41", "Map pin tooltips show the real step text, not the faint (optional) marker" },
   { "1.40", "Map & minimap no longer pin content-less steps (shared with the auto-skip logic)" },
   { "1.39", "Auto-skip content-less steps (all content filtered) instead of showing a bare checkbox" },

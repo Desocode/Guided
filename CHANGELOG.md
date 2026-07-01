@@ -3,6 +3,12 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.42
+- Map pin hover tooltip now lists each step once. A step with several `.goto` waypoints (e.g.
+  "Kill Reef Crawlers", which marks a 9-point kill area) added one point per waypoint, so a pin
+  that clustered several of them repeated the same step line. The tooltip now de-duplicates by
+  step. (Minimap pins have no tooltip.)
+
 ## 1.41
 - Map pin hover text now shows a step's real instruction instead of the faint "(optional)"
   marker. `#optional` adds a marker element, and the pin summary was picking it (it comes

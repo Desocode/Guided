@@ -371,6 +371,10 @@ function Guided.ParseLine(step, t)
       elseif cmd == "fly" or cmd == "taxi" then
         kind = "fly"; etext = disp or ("Fly to "..rest)
         step.fly = step.fly or trim(rest)   -- destination name for auto-taxi
+      elseif cmd == "abandon" then
+        kind = "note"; etext = disp or "Abandon quest"
+        local _, _, aid = string.find(rest or "", "(%d+)")          -- quest the guide tells you to abandon
+        if aid then step.abandonIds = step.abandonIds or {}; tinsert(step.abandonIds, tonumber(aid)) end
       elseif cmd == "vendor" or cmd == "buy" then kind = "vendor"; etext = disp or (rest ~= "" and rest) or "Vendor"
       elseif cmd == "train" or cmd == "trainer" then kind = "train"; etext = disp or "Train your spells"
       elseif cmd == "hearth" or cmd == "sethearth" or cmd == "home" or cmd == "hs" then
@@ -1510,14 +1514,13 @@ function Guided.IsStepDone(step, log)
           elseif not odone then return false end              -- objective not done
         elseif not entry.complete then return false end       -- whole quest not complete
       elseif q.action == "turnin" then
-        -- READ-ONLY: decide done-ness only; do NOT persist here. Persistence is owned by
-        -- RecordTurnin (QUEST_COMPLETE), which records the EARLIEST unrecorded same-named
-        -- turn-in. Writing q.id here (seen is keyed by NAME) mis-broadcast same-name chains
-        -- (456/457, the Crown of the Earth chain) -- the exact bug RecordTurnin was fixed for.
-        if Guided.seen[key] and not entry then                       -- seen this session, now gone = handed in
-          -- done (fall through)
-        elseif not (Guided_Save.doneQuests and q.id and Guided_Save.doneQuests[q.id]) then
-          return false                                               -- not turned in (or a same-named quest is back in the log)
+        -- Rely ONLY on doneQuests[id], which RecordTurnin (QUEST_COMPLETE) fills id-accurately.
+        -- A name-based "seen but now gone from the log" check over-fires for same-name chains
+        -- (954-957 are ALL "Bashal'Aran"): the instant the name left the log -- between parts,
+        -- or on abandon -- every same-named turn-in step looked handed in and the whole chain
+        -- got skipped. doneQuests is per-id, so each part completes only when actually turned in.
+        if not (Guided_Save.doneQuests and q.id and Guided_Save.doneQuests[q.id]) then
+          return false
         end
       end
     end
@@ -3816,24 +3819,39 @@ function AbandonQuest()
   if nm and nm ~= "" and Guided.active then
     local key = lc(nm)
     Guided.seen[key] = nil                                   -- so the vanish isn't a "hand-in"
-    -- route back to where this quest is accepted. Two quests can share a name (e.g.
-    -- the 456/457 "Balance of Nature" chain), so pick the LATEST accept of that name
-    -- BEFORE the current step -- the one you most recently picked up -- and key the
-    -- transient guard to that same quest id.
-    local origStep = Guided_Save.step or 1
-    local bestI, bestId
-    for i = 1, origStep - 1 do
-      local qs = Guided.active[i].quests
-      for k = 1, table.getn(qs or {}) do
-        if qs[k].action == "accept" and lc(QuestName(qs[k].id) or "") == key then
-          bestI = i; bestId = qs[k].id
+    -- Guide-instructed abandon? (an active ".abandon" step targets a quest of this name.)
+    -- Then it's deliberate: mark those steps done and DON'T route back to the accept step --
+    -- otherwise abandoning Bashal'Aran as the guide tells you sends you back to re-accept it.
+    local deliberate = false
+    for i = 1, table.getn(Guided.active) do
+      local st = Guided.active[i]
+      if st.abandonIds then
+        for k = 1, table.getn(st.abandonIds) do
+          if lc(QuestName(st.abandonIds[k]) or "") == key then
+            deliberate = true; if Guided.RecordDone then Guided.RecordDone(st) end
+          end
         end
       end
     end
-    -- clear ONLY the abandoned quest's id from doneQuests -- NOT every same-name id, or a
-    -- legitimately turned-in sibling (456 while abandoning 457) gets un-recorded forever.
-    if bestId and Guided_Save.doneQuests then Guided_Save.doneQuests[bestId] = nil end
-    if bestI then Guided_Save.step = bestI; Guided.justAbandonedId = bestId end
+    if not deliberate then
+      -- accidental abandon: route back to where this quest is accepted. Two quests can share
+      -- a name (e.g. the 456/457 chain), so pick the LATEST accept of that name BEFORE the
+      -- current step -- the one you most recently picked up -- and guard on that quest id.
+      local origStep = Guided_Save.step or 1
+      local bestI, bestId
+      for i = 1, origStep - 1 do
+        local qs = Guided.active[i].quests
+        for k = 1, table.getn(qs or {}) do
+          if qs[k].action == "accept" and lc(QuestName(qs[k].id) or "") == key then
+            bestI = i; bestId = qs[k].id
+          end
+        end
+      end
+      -- clear ONLY the abandoned quest's id from doneQuests -- NOT every same-name id, or a
+      -- legitimately turned-in sibling (456 while abandoning 457) gets un-recorded forever.
+      if bestId and Guided_Save.doneQuests then Guided_Save.doneQuests[bestId] = nil end
+      if bestI then Guided_Save.step = bestI; Guided.justAbandonedId = bestId end
+    end
   end
   if origAbandonQuest then origAbandonQuest() end   -- QUEST_LOG_UPDATE then re-runs SkipForward with the quest gone
 end
@@ -3848,8 +3866,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.34"
+Guided.VERSION = "1.35"
 Guided.changelog = {
+  { "1.35", "Fix same-name chains (Bashal'Aran) skipping; handle guide-instructed .abandon" },
   { "1.34", "/guided why -- diagnose why the current step isn't auto-completing" },
   { "1.33", "Revert 1.32: optional steps no longer auto-skip (it blew past wanted content on relog)" },
   { "1.31", ".fly steps complete on arrival -- fixes guides not auto-chaining to the next zone" },
@@ -3919,8 +3938,8 @@ SlashCmdList["GUIDED"] = function(msg)
         if q.action == "accept" then
           ok = entry and true or false; note = entry and "accepted" or "not in your log (accept it, or DB title differs from client)"
         elseif q.action == "turnin" then
-          ok = ((Guided.seen[key] and not entry) or done) and true or false
-          note = ok and "handed in" or (entry and "still in log (not turned in yet)" or "not seen this session")
+          ok = done and true or false
+          note = ok and "handed in" or (entry and "still in log (not turned in yet)" or "not recorded as handed in (turn it in / DB title may differ)")
         elseif q.action == "complete" then
           if not entry then ok = false; note = "not accepted"
           elseif q.obj then local od = ObjectiveDone(entry.idx, q.obj); ok = od and true or false; note = ok and "objective done" or "objective not done"

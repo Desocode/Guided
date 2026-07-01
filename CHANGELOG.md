@@ -3,6 +3,16 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.35
+- Fixed same-name quest chains skipping ahead. Several quests can share one title (the
+  Bashal'Aran chain, 954–957, are all "Bashal'Aran"); the turn-in check was name-based, so
+  the moment that name left your log — between parts, or on abandon — every same-named
+  turn-in step looked handed in and the whole chain got skipped. Turn-ins are now tracked by
+  quest **id**, so each part completes only when you actually hand it in.
+- Handled guide-instructed `.abandon` steps. `.abandon` is now parsed, and abandoning the
+  quest the guide tells you to no longer routes you *backward* to re-accept it (the
+  accidental-abandon recovery still works for quests you drop by mistake).
+
 ## 1.34
 - Added `/guided why` — prints a per-objective status for the current step (accepted /
   handed in / complete / not in the name DB / gated) so you can see exactly what's stopping

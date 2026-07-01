@@ -3,6 +3,12 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.44
+- A `.collect` step with no author comment now names the item ("Collect [Heavy Recurve Bow]")
+  instead of the generic "Collect the listed items". The item name is resolved from its ID via
+  `GetItemInfo` once the client has it cached (seen it in loot/vendor/AH); until then it falls
+  back to the generic text.
+
 ## 1.43
 - `.collect` gather side-steps now auto-complete once you hold enough of the item. They were
   parsed as untracked notes, so a "collect 5 Strider Meat" side-step lingered its whole window

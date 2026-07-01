@@ -345,7 +345,7 @@ function Guided.ParseLine(step, t)
   if disp == "" then disp = nil end
   if disp then tinsert(step.text, Sanitize(disp)) end
 
-  local kind, etext, eid, eobj, eauto, emarker = nil, disp, nil, nil, nil, nil
+  local kind, etext, eid, eobj, eauto, emarker, ecitem, eccount = nil, disp, nil, nil, nil, nil, nil, nil
 
   if pre == "" then
     if disp then kind = "note" end                       -- a plain ">>text" note
@@ -394,7 +394,11 @@ function Guided.ParseLine(step, t)
         if cid then step.collectItem = tonumber(cid); step.collectCount = tonumber(ccount) or 1 end
         if not etext then
           local _, _, cmt = string.find(rest, "%-%-%s*(.+)")
-          etext = (cmt and trim(cmt) ~= "" and trim(cmt)) or "Collect the listed items"
+          if cmt and trim(cmt) ~= "" then etext = trim(cmt)
+          else                                                 -- no author comment: resolve the item name at render (ElementLine)
+            etext = "Collect the listed items"
+            ecitem = cid and tonumber(cid); eccount = tonumber(ccount) or 1
+          end
         end
       elseif cmd == "fp" or cmd == "getfp" then kind = "fp"; etext = disp or "Get the flight point"
       elseif cmd == "fly" or cmd == "taxi" then
@@ -596,7 +600,7 @@ function Guided.ParseLine(step, t)
   end
 
   if kind and etext and etext ~= "" then
-    tinsert(step.elements, { kind = kind, text = Sanitize(etext), id = eid, obj = eobj, cond = lineCond, auto = eauto, marker = emarker })
+    tinsert(step.elements, { kind = kind, text = Sanitize(etext), id = eid, obj = eobj, cond = lineCond, auto = eauto, marker = emarker, citem = ecitem, ccount = eccount })
   end
 end
 
@@ -2095,6 +2099,13 @@ end
 
 local function ElementLine(el)
   if el.kind == "level" then return "|cff88ccff"..(el.text or "").."|r" end
+  if el.citem then                                            -- .collect with no author text: name the item once it's cached
+    local nm = GetItemInfo and GetItemInfo(el.citem)
+    if nm then
+      el.text = "Collect "..((el.ccount and el.ccount > 1) and (el.ccount.." ") or "").."["..nm.."]"
+      el.citem = nil                                          -- resolved; stop re-querying
+    end
+  end
   return el.text or ""
 end
 
@@ -3919,8 +3930,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.43"
+Guided.VERSION = "1.44"
 Guided.changelog = {
+  { "1.44", "Unlabeled .collect steps name the item (GetItemInfo) instead of \"Collect the listed items\"" },
   { "1.43", ".collect steps auto-complete once you hold enough of the item (fixes lingering gather side-steps)" },
   { "1.42", "Map pin tooltip lists each step once, not once per goto waypoint" },
   { "1.41", "Map pin tooltips show the real step text, not the faint (optional) marker" },

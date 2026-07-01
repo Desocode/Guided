@@ -3,6 +3,12 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.46
+- A `.complete <quest>,<objective>` step now clears when the **whole quest** reads complete,
+  not just when the per-objective progress read says so. If you'd finished an (optional) quest —
+  all items collected, quest ready to hand in — but the specific objective read was flaky, the
+  step could linger. It now completes as soon as the quest itself is complete.
+
 ## 1.45
 - **Cross-zone direction arrow.** When a step's target is in another zone (e.g. "Talk to Landria"
   in Darnassus while you're in Darkshore), the arrow now points *toward* it using bundled

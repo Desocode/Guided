@@ -1487,8 +1487,9 @@ function Guided.QuestSatisfied(q, log)
     return (Guided.seen[key] and not entry) and true or false
   elseif q.action == "complete" then
     if not entry then return false end
+    if entry.complete then return true end                   -- whole quest complete -> every objective satisfied
     if q.obj then return (ObjectiveDone(entry.idx, q.obj)) and true or false end
-    return entry.complete and true or false
+    return false
   end
   return true
 end
@@ -1595,6 +1596,8 @@ function Guided.IsStepDone(step, log)
         if not entry then return false end                   -- quest not in log yet
       elseif q.action == "complete" then
         if not entry then return false                       -- not even accepted
+        elseif entry.complete then                            -- whole quest complete -> every objective satisfied
+          -- done (covers a flaky per-objective read on an already-complete quest)
         elseif q.obj then
           local odone, ocur = ObjectiveDone(entry.idx, q.obj)
           if q.objMax then                                    -- ".complete id,obj,objMax": partial threshold
@@ -3970,8 +3973,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.45"
+Guided.VERSION = "1.46"
 Guided.changelog = {
+  { "1.46", "Complete a .complete step when the whole quest reads complete (flaky per-objective read)" },
   { "1.45", "Cross-zone direction arrow (points toward targets in other zones; bundled Astrolabe data)" },
   { "1.44", "Unlabeled .collect steps name the item (GetItemInfo) instead of \"Collect the listed items\"" },
   { "1.43", ".collect steps auto-complete once you hold enough of the item (fixes lingering gather side-steps)" },

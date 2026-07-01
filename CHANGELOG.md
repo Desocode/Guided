@@ -3,6 +3,11 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.30
+- Support `#displayname` (per-class/race guide names). Guides now show their intended
+  name for your character — e.g. the Darkshore segment displays as **"11-16 Darkshore"**
+  for a Night Elf instead of the raw "14-16 Darkshore". `/guided load` matches either name.
+
 ## 1.29
 - Added this changelog (`CHANGELOG.md`) and an in-game `/guided changelog` command.
 

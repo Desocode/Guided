@@ -1351,10 +1351,16 @@ step << Hunter
     >>|Tinterface/worldmap/chatbubble_64grey.blp:20|tTalk to |cRXP_FRIENDLY_Jocaste|r
     .turnin 6103 >> Turn in Training the Beast
 step << !Rogue
+    .goto Darnassus,28.9,45.8
+    .target Sister Aquinne
+    >>|Tinterface/worldmap/chatbubble_64grey.blp:20|tTalk to |cRXP_FRIENDLY_Sister Aquinne|r in the Temple of the Moon
+    .accept 2519 >> Accept The Temple of the Moon
+step << !Rogue
     .goto Darnassus,39.72,92.68,10,0
     .goto Darnassus,36.65,85.93
     .target Priestess A'moora
     >>|Tinterface/worldmap/chatbubble_64grey.blp:20|tTalk to |cRXP_FRIENDLY_Priestess A'moora|r
+    .turnin 2519 >> Turn in The Temple of the Moon
     .accept 2518 >> Accept Tears of the Moon
 step << Druid
 	#completewith next
@@ -1625,10 +1631,16 @@ step << Rogue
     .target Syurna
     .accept 2242 >> Accept Destiny Calls
 step << Rogue
+    .goto Darnassus,28.9,45.8
+    .target Sister Aquinne
+    >>|Tinterface/worldmap/chatbubble_64grey.blp:20|tTalk to |cRXP_FRIENDLY_Sister Aquinne|r in the Temple of the Moon
+    .accept 2519 >> Accept The Temple of the Moon
+step << Rogue
     .goto Darnassus,39.72,92.68,10,0
     .goto Darnassus,36.65,85.93
     .target Priestess A'moora
     >>|Tinterface/worldmap/chatbubble_64grey.blp:20|tTalk to |cRXP_FRIENDLY_Priestess A'moora|r
+    .turnin 2519 >> Turn in The Temple of the Moon
     .accept 2518 >> Accept Tears of the Moon
 step << Warrior
 #xprate >1.99

@@ -77,20 +77,26 @@ end
 local function FormatGoto(raw)
   local f = {}
   for part in string.gfind(raw or "", "[^,]+") do tinsert(f, trim(part)) end
+  -- strip a "/floor" suffix on a numeric map id (e.g. "1438/1"), like ParseGoto
+  local first = f[1]
+  if first then local sl = string.find(first, "/", 1, true); if sl then first = string.sub(first, 1, sl - 1) end end
   local zone, x, y
-  if f[1] and not tonumber(f[1]) then
+  if first and not tonumber(first) then
     zone = f[1]; x = tonumber(f[2]); y = tonumber(f[3])
   elseif f[3] then
-    zone = Guided_ZoneDB and Guided_ZoneDB[tonumber(f[1])]   -- numeric uiMapID -> zone name
+    zone = Guided_ZoneDB and Guided_ZoneDB[tonumber(first)]   -- numeric uiMapID -> zone name
     x = tonumber(f[2]); y = tonumber(f[3])
   else
     x = tonumber(f[1]); y = tonumber(f[2])       -- x,y (current zone)
   end
-  if x and y then
+  -- only render 0-100 map percentages; world coords (out of range) have no readable
+  -- position, so show a plain label instead of garbage numbers (matches ParseGoto).
+  if x and y and x >= 0 and x <= 100 and y >= 0 and y <= 100 then
     if zone then return string.format("Go to %s (%.1f, %.1f)", zone, x, y) end
     return string.format("Go to (%.1f, %.1f)", x, y)
   end
-  return "Go to "..(raw or "")
+  if zone then return "Go to "..zone end
+  return "Go to your objective"
 end
 
 -- guides gate steps by client/version with "<<" tokens (era/sod/tbc/...). On a
@@ -113,19 +119,22 @@ function Guided.EvalCondition(cond)
   if s then c = string.sub(c, 1, s - 1) end
   c = trim(c)
   if c == "" then return true end
-  for group in string.gfind(c, "%S+") do
-    -- a "/" group is an OR over its tokens; "!x" is satisfied when x does NOT match.
-    -- (e.g. "!sod/Warrior" = (not sod) OR Warrior -> true on Era for everyone.)
-    local groupTrue = false
-    for tok in string.gfind(group, "[^/]+") do
+  -- "/" is the LOWEST-precedence OR and whitespace binds tighter (AND), matching RXP's
+  -- applies(): split into OR-segments on "/", AND the whitespace tokens inside each,
+  -- true if ANY segment fully matches. e.g. "NightElf Rogue/Mage" = (NightElf AND Rogue)
+  -- OR Mage; "!sod/Warrior" = (not sod) OR Warrior. "!x" negates a token.
+  for segment in string.gfind(c, "[^/]+") do
+    local segTrue, anyTok = true, false
+    for tok in string.gfind(segment, "%S+") do
+      anyTok = true
       local ok
       if string.sub(tok, 1, 1) == "!" then ok = not MatchToken(string.sub(tok, 2))
       else ok = MatchToken(tok) end
-      if ok then groupTrue = true; break end
+      if not ok then segTrue = false; break end   -- tokens within a segment are AND'd
     end
-    if not groupTrue then return false end       -- groups are AND'd
+    if anyTok and segTrue then return true end     -- this OR-segment matched -> condition true
   end
-  return true
+  return false
 end
 
 -- a per-line "<< cond" passes if absent, or its condition matches this character
@@ -174,12 +183,17 @@ end
 local function XpRateOK(step)
   if not step.xprate then return true end
   local rate = Guided_Save.xprate or 1
-  local _, _, op, num = string.find(tostring(step.xprate), "([<>]?)%s*([0-9.]+)")
-  num = tonumber(num)
-  if not num then return true end
-  if op == "<" then return rate < num
-  elseif op == ">" then return rate > num end
-  return true
+  local s = tostring(step.xprate)
+  local _, _, op, lo = string.find(s, "([<>]?)%s*([0-9.]+)")
+  lo = tonumber(lo)
+  if not lo then return true end
+  if op == "<" then return rate < lo
+  elseif op == ">" then return rate > lo end
+  -- no operator: bare "N" = minimum (rate >= N); "N-M" = inclusive range (RXP xpmin/xpmax)
+  local _, _, hi = string.find(s, "[0-9.]+%s*%-%s*([0-9.]+)")
+  hi = tonumber(hi)
+  if hi then return rate >= lo and rate <= hi end
+  return rate >= lo
 end
 local function ModeOK(step)
   if step.hardcore and not Guided_Save.hardcore then return false end
@@ -234,6 +248,8 @@ function Guided.BuildActive()
   Guided.dispNum = {}
   for i = 1, n do Guided.dispNum[i] = i end
   Guided.numMain = n
+  Guided.RefreshGuideQuestNames()
+  if Guided.UpdateQuestLogIcons then Guided.UpdateQuestLogIcons() end
 end
 
 -- resolve a quest id to its name via the bundled quest-name DB (Data\QuestNames.lua).
@@ -242,6 +258,36 @@ end
 local function QuestName(id)
   if not id then return nil end
   return Guided_QuestDB and Guided_QuestDB[id] or nil
+end
+
+-- set of lowercased quest names the player's guide path references (accept/turnin/
+-- complete). Used to mark guide quests in the Blizzard quest log. Rebuilt by
+-- BuildActive. 1.12 has no quest ids in the log, so we match by resolved name.
+function Guided.RefreshGuideQuestNames()
+  local set, pickup, turnin = {}, {}, {}
+  if Guided.active then
+    for i = 1, table.getn(Guided.active) do
+      local qs = Guided.active[i].quests
+      if qs then
+        for k = 1, table.getn(qs) do
+          local q = qs[k]
+          if q.id and CondOK(q.cond) then
+            local nm = QuestName(q.id)
+            if nm then
+              nm = lc(nm)
+              set[nm] = true
+              local num = (Guided.dispNum and Guided.dispNum[i]) or true
+              if q.action == "accept" and not pickup[nm] then pickup[nm] = num end
+              if q.action == "turnin" and not turnin[nm] then turnin[nm] = num end
+            end
+          end
+        end
+      end
+    end
+  end
+  Guided.guideQuestNames = set
+  Guided.questPickup = pickup      -- lc name -> dispNum of the step that accepts it
+  Guided.questTurnin = turnin      -- lc name -> dispNum of the step that turns it in
 end
 
 -- ----------------------------------------------------------------- parser ----
@@ -290,13 +336,14 @@ function Guided.ParseLine(step, t)
           end                                                  -- else navigation-only (arrow uses step.gotos)
         end
       elseif cmd == "accept" or cmd == "complete" or cmd == "turnin" then
-        -- form: ".accept <id>", ".turnin <id>", ".complete <id>,<objective>"
-        local _, _, id, obj = string.find(rest, "(%d+),?(%d*)")
+        -- form: ".accept <id>", ".turnin <id>", ".complete <id>,<objective>[,<objMax>]"
+        local _, _, id, obj, omax = string.find(rest, "(%d+),?(%d*),?(%d*)")
         eid = tonumber(id); eobj = tonumber(obj)
+        local eobjmax = (cmd == "complete") and tonumber(omax) or nil   -- partial-objective threshold
         local _, _, tnum = string.find(rest, "%(x?(%d+)%)")    -- target count from "(x7)"
         local _, _, cmt = string.find(rest, "%-%-%s*(.+)")
         local label = cmt and trim(string.gsub(cmt, "%s*%b()%s*$", "")) or nil  -- comment minus "(x7)"
-        tinsert(step.quests, { action = cmd, id = eid, obj = eobj, cond = lineCond,
+        tinsert(step.quests, { action = cmd, id = eid, obj = eobj, objMax = eobjmax, cond = lineCond,
           target = tonumber(tnum), label = label })
         kind = cmd
         if not etext then
@@ -308,6 +355,17 @@ function Guided.ParseLine(step, t)
             local verb = (cmd == "accept" and "Accept") or (cmd == "turnin" and "Turn in") or "Complete"
             etext = verb..(nm and (": "..nm) or (" quest "..(eid or "?")))
           end
+        end
+      elseif cmd == "collect" then
+        -- ".collect <id>,<count>[,...]" -- a loot/gather goal (text carried as a -- comment).
+        -- 1.12 gives no quest-id log tracking for these, so we can't auto-complete on count;
+        -- mark the step as carrying an objective so StepArrived won't skip it on arrival, and
+        -- surface the item note as a visible line.
+        step.collect = true
+        kind = "note"
+        if not etext then
+          local _, _, cmt = string.find(rest, "%-%-%s*(.+)")
+          etext = (cmt and trim(cmt) ~= "" and trim(cmt)) or "Collect the listed items"
         end
       elseif cmd == "fp" or cmd == "getfp" then kind = "fp"; etext = disp or "Get the flight point"
       elseif cmd == "fly" or cmd == "taxi" then
@@ -480,12 +538,20 @@ function Guided.ParseLine(step, t)
     elseif first == "#" then
       local _, _, key, val = string.find(pre, "^#(%a+)%s*(.*)")
       if val then val = trim(string.gsub(val, "%s*%-%-.*$", "")) end
-      if key == "level" then
-        step.level = tonumber(val); kind = "level"; etext = disp or ("Reach level "..(val or "?"))
-      elseif key == "optional" then
-        step.optional = true; kind = "note"; etext = "|cff888888(optional)|r"
-      elseif key then
-        step[key] = (val ~= "" and val) or true
+      -- a "#dir << cond" that doesn't apply to THIS character is dropped entirely (RXP
+      -- drops the line at load) so it can't set step.completewith/#requires/#level/etc.
+      if key and CondOK(lineCond) then
+        if key == "level" then
+          step.level = tonumber(val)                 -- level GATE (always set)
+          -- only show "Reach level N" as an objective on a STANDALONE level step. When the
+          -- step also #completewith's another step, the level is just a relevance gate (RXP
+          -- doesn't render it) -- otherwise "Reach level N" repeats on every gated step.
+          if not step.completewith then kind = "level"; etext = disp or ("Reach level "..(val or "?")) end
+        elseif key == "optional" then
+          step.optional = true; kind = "note"; etext = "|cff888888(optional)|r"
+        else
+          step[key] = (val ~= "" and val) or true
+        end
       end
     elseif first == "+" then
       kind = "note"; etext = string.sub(pre, 2)
@@ -550,6 +616,12 @@ function Guided.Parse(text, headerOnly)
           end
         elseif key == "next" then guide.nextguide = trim(val)          -- chains to the next guide
         elseif key == "loop" then guide.loop = true                     -- repeats from step 1 when finished
+        elseif key == "displayname" then                                -- player-facing name; may vary by class/race
+          local v = trim(val)
+          local _, _, nm, cond = string.find(v, "^(.-)%s*<<%s*(.*)$")
+          guide.displaynames = guide.displaynames or {}
+          if cond and cond ~= "" then tinsert(guide.displaynames, { text = trim(nm), cond = trim(cond) })
+          else tinsert(guide.displaynames, { text = v }) end
         end
       else
         Guided.ParseLine(step, t)
@@ -683,16 +755,31 @@ local function ParseGoto(raw)
   local f = {}
   for part in string.gfind(raw, "[^,]+") do tinsert(f, trim(part)) end
   if table.getn(f) < 2 then return nil end
-  if tonumber(f[1]) then
+  -- a numeric first token may carry a "/floor" suffix (uiMapID/floor), e.g. "1438/1";
+  -- strip it so the map id still resolves.
+  local first = f[1]
+  local slash = string.find(first, "/", 1, true)
+  if slash then first = string.sub(first, 1, slash - 1) end
+  local zone, mapid, tx, ty
+  if tonumber(first) then
     if table.getn(f) >= 3 then
-      local mid = tonumber(f[1])
-      local zname = Guided_ZoneDB and Guided_ZoneDB[mid]
-      if zname then return zname, nil, tonumber(f[2]), tonumber(f[3]) end  -- uiMapID -> zone name
-      return nil, mid, tonumber(f[2]), tonumber(f[3])              -- unknown mapid,x,y
+      mapid = tonumber(first)
+      zone = Guided_ZoneDB and Guided_ZoneDB[mapid] or nil       -- uiMapID -> zone name
+      tx, ty = tonumber(f[2]), tonumber(f[3])
+    else
+      tx, ty = tonumber(f[1]), tonumber(f[2])                    -- x,y (current zone)
     end
-    return nil, nil, tonumber(f[1]), tonumber(f[2])                -- x,y (current zone)
+  else
+    zone = f[1]                                                  -- zoneName,x,y
+    tx, ty = tonumber(f[2]), tonumber(f[3])
   end
-  return f[1], nil, tonumber(f[2]), tonumber(f[3])                 -- zoneName,x,y
+  -- coords must be valid 0-100 map percentages. RXP also uses raw WORLD coordinates
+  -- for precise spots (e.g. ".goto 1438/1,854.4,9952.5" for the Fel Cone locations);
+  -- converting those needs per-zone world bounds we don't bundle, so treat them as
+  -- "no usable waypoint" (the step still shows its text + the author's per-goto note)
+  -- instead of sending the arrow/pins to a bogus 854%/9952% position that breaks nav.
+  if not tx or not ty or tx < 0 or tx > 100 or ty < 0 or ty > 100 then return nil end
+  return zone, mapid, tx, ty
 end
 
 -- World-map pins (self-contained, no external map libs): a numbered marker for every
@@ -788,12 +875,13 @@ function Guided.UpdateWorldMapPins()
   --    any active stickies (which can sit behind the current step). NOT past steps.
   local pts = {}
   local function consider(ai)
-    local st = active[ai]; if not st then return end
-    local gs = st.gotos and st.gotos[1]; if not gs then return end
-    local zone, _, tx, ty = ParseGoto(gs)
-    if zone and tx and ty and normalize(zone) == snorm then
-      tinsert(pts, { ai = ai, num = Guided.dispNum and Guided.dispNum[ai], st = st,
-                     px = (tx / 100) * w, py = (ty / 100) * h })
+    local st = active[ai]; if not st or not st.gotos then return end
+    for gi = 1, table.getn(st.gotos) do                          -- a pin per goto (both NPCs of a 2-NPC step)
+      local zone, _, tx, ty = ParseGoto(st.gotos[gi])
+      if zone and tx and ty and normalize(zone) == snorm then
+        tinsert(pts, { ai = ai, num = Guided.dispNum and Guided.dispNum[ai], st = st,
+                       px = (tx / 100) * w, py = (ty / 100) * h })
+      end
     end
   end
   if Guided.activeStickies then
@@ -919,6 +1007,10 @@ function Guided.HandleTaxi()
   if not Guided_Save.autofly then return end
   local want = Guided.WantedFlights()
   if table.getn(want) == 0 then return end
+  -- don't auto-fly while the current step still wants a quest accepted/turned in (the flight
+  -- master is also the quest giver, e.g. "The Bounty of Teldrassil") -- do the quest first.
+  if Guided.StepQuestActionPending and Guided.StepQuestActionPending(Guided.CurrentStep(),
+       Guided.BuildQuestLog and Guided.BuildQuestLog()) then return end
   local n = (NumTaxiNodes and NumTaxiNodes()) or 0
   for i = 1, n do
     local name = TaxiNodeName and TaxiNodeName(i)
@@ -935,22 +1027,46 @@ end
 function Guided.HandleTaxiGossip()
   if not Guided_Save.autofly or not GetGossipOptions then return end
   if table.getn(Guided.WantedFlights()) == 0 then return end
+  -- accept/turn in first at a flight-master-quest-giver, then fly (see HandleTaxi)
+  if Guided.StepQuestActionPending and Guided.StepQuestActionPending(Guided.CurrentStep(),
+       Guided.BuildQuestLog and Guided.BuildQuestLog()) then return end
   local opts = { GetGossipOptions() }   -- text1, type1, text2, type2, ...
   for i = 1, table.getn(opts), 2 do
     if opts[i + 1] == "taxi" then SelectGossipOption((i + 1) / 2); return end
   end
 end
 
+-- first still-pending goto of a MULTI-goto step, cached and recomputed at most ~2x/sec.
+-- ArrowGoto runs ~20x/sec from the arrow OnUpdate; computing this every frame scanned the
+-- whole quest log (SelectQuestLogEntry per objective) and lagged the game. Single-goto steps
+-- (nearly all of them) never reach here.
+function Guided.PendingGotoCached(step)
+  local now = (GetTime and GetTime()) or 0
+  if Guided._pgStep ~= step or not Guided._pgT or (now - Guided._pgT) > 0.5 then
+    Guided._pgStep = step; Guided._pgT = now
+    local log = Guided.BuildQuestLog and Guided.BuildQuestLog()
+    local pend = Guided.StepPendingGotos and Guided.StepPendingGotos(step, log)
+    Guided._pgResult = pend and pend[1] or nil
+  end
+  return Guided._pgResult
+end
+
 function Guided.ArrowGoto()
   local step = Guided.CurrentStep()
-  if step and step.gotos and step.gotos[1] then return step.gotos[1] end
+  if step and step.gotos and step.gotos[1] then
+    if table.getn(step.gotos) <= 1 then return step.gotos[1] end        -- fast path: most steps
+    return Guided.PendingGotoCached(step) or step.gotos[1]              -- multi-NPC step: cached
+  end
   if Guided.activeStickies and Guided.active then
     local order = {}
     for idx in pairs(Guided.activeStickies) do tinsert(order, idx) end
     table.sort(order)
     for o = 1, table.getn(order) do
       local sk = Guided.active[order[o]]
-      if sk and sk.gotos and sk.gotos[1] then return sk.gotos[1] end
+      if sk and sk.gotos and sk.gotos[1] then
+        if table.getn(sk.gotos) <= 1 then return sk.gotos[1] end
+        return Guided.PendingGotoCached(sk) or sk.gotos[1]
+      end
     end
   end
   return nil
@@ -971,11 +1087,71 @@ local ZONE_YARDS = {
   ["Silithus"]=3483,["Felwood"]=5750,["Winterspring"]=7099,["Azshara"]=6357,["Moonglade"]=2308,
 }
 
+-- has the player reached a PURE-TRAVEL step's destination? Like RXP, a ".goto x,y,radius"
+-- step auto-completes on arrival (dist <= radius, in yards). Restricted to steps with no
+-- quest and no action element (vendor/train/use/turnin/...) so a "buy/train at X" step is
+-- NOT skipped just for walking up to it. Distance is approximate (ZONE_YARDS), good enough
+-- for "you're here". Skipped while the world map is open (player position is unreliable).
+function Guided.StepArrived(step)
+  if not step or not step.gotos or table.getn(step.gotos) == 0 then return false end
+  if step.quests and table.getn(step.quests) > 0 then return false end
+  if step.useitems and table.getn(step.useitems) > 0 then return false end
+  if step.targets and table.getn(step.targets) > 0 then return false end
+  -- any step that carries its OWN completion objective is NOT pure travel -- e.g. a
+  -- ".collect" loot goal, an .xp grind gate, a level/zone/hearth goal. Auto-completing
+  -- those on mere arrival would skip the real objective (e.g. loot 0/7 Power Crystals).
+  if step.collect or step.xpGate or step.level or step.zonegoal or step.homename or step.ishs then return false end
+  if step.elements then
+    for k = 1, table.getn(step.elements) do
+      local kd = step.elements[k].kind
+      if kd and kd ~= "goto" and kd ~= "note" then return false end   -- has an actionable element
+    end
+  end
+  if WorldMapFrame and WorldMapFrame:IsVisible() then return false end
+  -- destination = the last goto that carries a positive radius
+  local dz, dtx, dty, drad
+  for k = table.getn(step.gotos), 1, -1 do
+    local zone, _, tx, ty = ParseGoto(step.gotos[k])
+    local rad = GotoRadius(step.gotos[k])
+    if tx and ty and rad and rad > 0 then dz, dtx, dty, drad = zone, tx, ty, rad; break end
+  end
+  if not dtx then return false end
+  local cz = GetRealZoneText() or ""
+  if dz and lc(dz) ~= lc(cz) then return false end          -- not in the destination zone yet
+  SetMapToCurrentZone()
+  local px, py = GetPlayerMapPosition("player")
+  if px == 0 and py == 0 then return false end
+  local ddx, ddy = dtx - px*100, dty - py*100
+  local w = ZONE_YARDS[cz] or 3500
+  local yx, yy = ddx/100*w, ddy/100*(w/1.5)
+  return math.sqrt(yx*yx + yy*yy) <= drad
+end
+
 function Guided.ArrowUpdate(elapsed)
   if not GuidedArrow then return end
   arrowThrottle = arrowThrottle - (elapsed or 0)
   if arrowThrottle > 0 then return end
   arrowThrottle = 0.05
+  -- proximity completion: advance the guide when a pure-travel step is reached. Throttled to
+  -- ~4x/sec (not every 0.05s frame) -- StepArrived calls SetMapToCurrentZone/GetPlayerMapPosition
+  -- and arrival doesn't need 20 checks a second.
+  Guided.arrivedT = (Guided.arrivedT or 0) - 0.05
+  if Guided.arrivedT <= 0 then
+    Guided.arrivedT = 0.25
+    if Guided.StepArrived(Guided.CurrentStep()) then Guided.SkipForward() end
+  end
+  -- safety re-eval (~every 4s): if the current step has become done but no event advanced
+  -- us (a missed/transient trigger), catch it. Cheap and churn-free -- only calls
+  -- SkipForward when the current step actually reads done, so a stuck step self-heals.
+  Guided.reevalT = (Guided.reevalT or 4) - 0.05
+  if Guided.reevalT <= 0 then
+    Guided.reevalT = 4
+    local ci = Guided_Save.step or 1
+    if Guided.active and Guided.active[ci] and Guided.BuildQuestLog
+       and Guided.StepDoneByIndex(ci, Guided.BuildQuestLog()) then
+      Guided.SkipForward()
+    end
+  end
   local model = getglobal("GuidedArrowModel")
   local txt = getglobal("GuidedArrowText")
 
@@ -1062,22 +1238,25 @@ function Guided.UpdateMinimapPins()
   -- 1) collect candidate points that fall on the minimap
   local pts = {}
   local function consider(ai)
-    if table.getn(pts) >= 12 then return end
-    local st = active[ai]; if not st then return end
-    local gs = st.gotos and st.gotos[1]; if not gs then return end
-    local zone, _, tx, ty = ParseGoto(gs)
-    if not (zone and tx and ty) or normalize(zone) ~= znorm then return end
-    local sx = (tx / 100 - px) * zoneW                          -- east+
-    local sy = -((ty / 100 - py) * zoneH)                       -- north+ (map y is south+)
-    if facing ~= 0 then
-      local rx = sx * cosf + sy * sinf
-      local ry = -sx * sinf + sy * cosf
-      sx, sy = rx, ry
+    local st = active[ai]; if not st or not st.gotos then return end
+    for gi = 1, table.getn(st.gotos) do                          -- a pin per goto (both NPCs of a 2-NPC step)
+      if table.getn(pts) >= 12 then return end
+      local zone, _, tx, ty = ParseGoto(st.gotos[gi])
+      if zone and tx and ty and normalize(zone) == znorm then
+        local sx = (tx / 100 - px) * zoneW                       -- east+
+        local sy = -((ty / 100 - py) * zoneH)                    -- north+ (map y is south+)
+        if facing ~= 0 then
+          local rx = sx * cosf + sy * sinf
+          local ry = -sx * sinf + sy * cosf
+          sx, sy = rx, ry
+        end
+        local ox, oy = sx * pixPerYard, sy * pixPerYard
+        if math.sqrt(ox * ox + oy * oy) <= edge then             -- on the minimap (arrow covers far)
+          tinsert(pts, { ox = ox, oy = oy, ai = ai,
+                         num = (not st.sticky) and Guided.dispNum and Guided.dispNum[ai] or nil })
+        end
+      end
     end
-    local ox, oy = sx * pixPerYard, sy * pixPerYard
-    if math.sqrt(ox * ox + oy * oy) > edge then return end       -- off the minimap (arrow covers far)
-    tinsert(pts, { ox = ox, oy = oy, ai = ai,
-                   num = (not st.sticky) and Guided.dispNum and Guided.dispNum[ai] or nil })
   end
   if Guided.activeStickies then
     for ai in pairs(Guided.activeStickies) do if ai < cur then consider(ai) end end
@@ -1149,7 +1328,9 @@ local function CreateArrow()
   txt:SetPoint("TOP", a, "BOTTOM", 0, -2)
   -- frame stays shown so OnUpdate keeps firing (hidden frames don't update);
   -- the model/text hide themselves when there's nothing to point at.
-  a:SetScript("OnUpdate", function() Guided.ArrowUpdate(arg1) end)
+  -- pcall-isolated: this per-frame path calls StepArrived -> SkipForward, so an error
+  -- here would otherwise throw ~20x/sec and spam the UI error frame with no recovery.
+  a:SetScript("OnUpdate", function() pcall(Guided.ArrowUpdate, arg1) end)
 end
 
 -- snapshot the live quest log keyed by lowercased title:
@@ -1168,9 +1349,29 @@ BuildQuestLog = function()
       Guided.seen[key] = true
     end
   end
+  -- NOTE: no name-based "clear doneQuests for quests still in the log" self-heal here.
+  -- It looked safe but is broken for same-name chains: quests 921/928/929/933/7383/935
+  -- are ALL "Crown of the Earth", so accepting 928 (in log) would clear the legitimate
+  -- doneQuests[921] hand-in (same name) -> the turn-in step never completes and the guide
+  -- won't advance. RecordTurnin now records only the earliest unrecorded same-named
+  -- turn-in, so no bad entries are created; a one-time reset (Defaults) clears any left
+  -- over from the old broadcast bug.
   return log
 end
 Guided.BuildQuestLog = BuildQuestLog   -- exposed so SetStep (defined earlier) can use it
+
+-- does ANY quest in the log with this (lowercased) title show complete? Same-name quests
+-- (e.g. the Crown of the Earth chain) collapse in the name-keyed log, so log[name].complete
+-- can reflect the wrong twin. Scan every entry instead (per-entry isComplete IS reliable in
+-- the quest-log API, unlike the greeting/gossip active-quest API on 1.12).
+local function NameComplete(name)
+  local n = GetNumQuestLogEntries and GetNumQuestLogEntries() or 0
+  for i = 1, n do
+    local title, _, _, isHeader, _, isComplete = GetQuestLogTitle(i)
+    if title and not isHeader and lc(title) == name and isComplete == 1 then return true end
+  end
+  return false
+end
 
 -- is objective `obj` of the quest at log index `li` finished?
 -- uses SelectQuestLogEntry + restore (portable: works across 1.12 servers)
@@ -1178,9 +1379,69 @@ local function ObjectiveDone(li, obj)
   if not (li and obj) then return nil end
   local sel = GetQuestLogSelection()
   SelectQuestLogEntry(li)
-  local _, _, done = GetQuestLogLeaderBoard(obj)
+  local txt, _, done = GetQuestLogLeaderBoard(obj)
   if sel then SelectQuestLogEntry(sel) end
-  return done
+  local cur
+  if txt then local _, _, c = string.find(txt, "(%d+)%s*/%s*%d+"); cur = tonumber(c) end
+  return done, cur                              -- done flag, fulfilled count (the "x" of x/y)
+end
+
+-- is a single quest objective satisfied RIGHT NOW? accept = in the log; turnin = recorded
+-- done or seen->gone; complete = objective/whole quest done. Drives per-element ticking and
+-- multi-goto arrow/pin advancement. Unknown id -> not satisfied (still worth pointing at).
+function Guided.QuestSatisfied(q, log)
+  if not q or not q.id then return true end
+  local nm = QuestName(q.id); if not nm then return false end
+  local key = lc(nm)
+  local entry = log and log[key]
+  if q.action == "accept" then
+    return entry ~= nil
+  elseif q.action == "turnin" then
+    if Guided_Save.doneQuests and Guided_Save.doneQuests[q.id] then return true end
+    return (Guided.seen[key] and not entry) and true or false
+  elseif q.action == "complete" then
+    if not entry then return false end
+    if q.obj then return (ObjectiveDone(entry.idx, q.obj)) and true or false end
+    return entry.complete and true or false
+  end
+  return true
+end
+
+-- ordered gotos of a step that are still PENDING -- RXP tracks a waypoint per element, so a
+-- 2-NPC step (accept A here, accept B there) should point the arrow / drop a pin at the NPC
+-- for the first UNSATISFIED quest and move on as each is done. Pairs goto[k] with quest[k]
+-- by order; a goto with no paired quest, or a step with no quests, is always pending.
+function Guided.StepPendingGotos(step, log)
+  local out = {}
+  if not step or not step.gotos then return out end
+  local ng = table.getn(step.gotos)
+  local qs = step.quests or {}
+  local nq = table.getn(qs)
+  for k = 1, ng do
+    local q = qs[k]
+    if not q or not q.id or not CondOK(q.cond) or not Guided.QuestSatisfied(q, log) then
+      tinsert(out, step.gotos[k])
+    end
+  end
+  -- more quests than gotos: if the sole/last goto's quest is done but a later quest isn't,
+  -- keep the last goto pending so the arrow still has a target.
+  if ng > 0 and table.getn(out) == 0 and nq > 0 then tinsert(out, step.gotos[ng]) end
+  return out
+end
+
+-- does this step still need a quest ACCEPTED or TURNED IN? Used to hold off auto-fly at an
+-- NPC that is BOTH flight master and quest giver (e.g. Rut'theran) -- accept/turn in first,
+-- fly once the step advances to an actual .fly step. accept = not in log; turnin = not done.
+function Guided.StepQuestActionPending(step, log)
+  if not step or not step.quests then return false end
+  for k = 1, table.getn(step.quests) do
+    local q = step.quests[k]
+    if q.id and CondOK(q.cond) and (q.action == "accept" or q.action == "turnin")
+       and not Guided.QuestSatisfied(q, log) then
+      return true
+    end
+  end
+  return false
 end
 
 -- is a step already satisfied? text-only steps (no quests, no level) are never
@@ -1212,7 +1473,12 @@ function Guided.IsStepDone(step, log)
     if b ~= "" and (lc(GetRealZoneText() or "") == b or lc(GetSubZoneText() or "") == b) then return true end
   end
   if step.level and UnitLevel("player") >= step.level then return true end
-  if step.xpGate and (step.xpGate.skip or Guided_Save.skipoverlevel ~= false) and Guided.XpGateMet(step.xpGate) then return true end
+  if step.xpGate and Guided.XpGateMet(step.xpGate) then
+    -- plain grind (no skipstep) and reverse gates always complete at threshold; a forward
+    -- skipstep gate (".xp <N,1") only skips when "Skip overleveled steps" is on (matches RXP).
+    local g = step.xpGate
+    if (not g.skip) or g.reverse or (Guided_Save.skipoverlevel ~= false) then return true end
+  end
   if table.getn(step.quests) == 0 then return false end
   if not log then return false end
   local any = false
@@ -1233,12 +1499,18 @@ function Guided.IsStepDone(step, log)
       elseif q.action == "complete" then
         if not entry then return false                       -- not even accepted
         elseif q.obj then
-          if not ObjectiveDone(entry.idx, q.obj) then return false end -- objective not done
+          local odone, ocur = ObjectiveDone(entry.idx, q.obj)
+          if q.objMax then                                    -- ".complete id,obj,objMax": partial threshold
+            if not ocur or ocur < q.objMax then return false end   -- complete at objMax, not full
+          elseif not odone then return false end              -- objective not done
         elseif not entry.complete then return false end       -- whole quest not complete
       elseif q.action == "turnin" then
-        if Guided.seen[key] and not entry then                       -- seen, now gone = turned in
-          Guided_Save.doneQuests = Guided_Save.doneQuests or {}
-          if q.id then Guided_Save.doneQuests[q.id] = true end       -- remember the hand-in (persisted)
+        -- READ-ONLY: decide done-ness only; do NOT persist here. Persistence is owned by
+        -- RecordTurnin (QUEST_COMPLETE), which records the EARLIEST unrecorded same-named
+        -- turn-in. Writing q.id here (seen is keyed by NAME) mis-broadcast same-name chains
+        -- (456/457, the Crown of the Earth chain) -- the exact bug RecordTurnin was fixed for.
+        if Guided.seen[key] and not entry then                       -- seen this session, now gone = handed in
+          -- done (fall through)
         elseif not (Guided_Save.doneQuests and q.id and Guided_Save.doneQuests[q.id]) then
           return false                                               -- not turned in (or a same-named quest is back in the log)
         end
@@ -1285,6 +1557,7 @@ function Guided.StepDoneByIndex(i, log, depth)
   local s = Guided.active and Guided.active[i]
   if not s then return false end
   if Guided.IsDoneStored(s) then return true end
+  if Guided.StepArrived(s) then return true end   -- pure-travel step: reached its destination
   if s.completewith and s.completewith ~= true then
     local target
     if s.completewith == "next" then target = i + 1
@@ -1315,19 +1588,16 @@ function Guided.StepGateMet(step, log)
       if nm then
         resolvable = true
         local key = lc(nm)
-        if gate.t == "onquest" then
-          if log and log[key] then met = true end
-        elseif gate.t == "complete" then
-          if log and log[key] and log[key].complete then met = true end
-        elseif gate.t == "turnedin" then
-          if Guided_Save.doneQuests and Guided_Save.doneQuests[id] then met = true end
+        local idMet = false
+        if gate.t == "onquest" then idMet = (log and log[key]) and true or false
+        elseif gate.t == "complete" then idMet = (log and log[key] and log[key].complete) and true or false
+        elseif gate.t == "turnedin" then idMet = (Guided_Save.doneQuests and Guided_Save.doneQuests[id]) and true or false
         end
+        if gate.rev then idMet = not idMet end     -- negate PER ID (OR-of-negations), e.g.
+        if idMet then met = true end               -- .isQuestAvailable 100/101 = shown while ANY still available
       end
     end
-    if resolvable then
-      if gate.rev then met = not met end
-      if not met then return false end
-    end
+    if resolvable and not met then return false end
   end
   -- prerequisite: a #requires step must be done first
   if step.requires and Guided.labelIndex then
@@ -1346,17 +1616,28 @@ function Guided.StepGateMet(step, log)
       if skip then return false end
     end
   end
-  -- .itemcount: satisfied (skip) when the bag count meets the test
+  -- .itemcount: per RXP the step SHOWS while the count test holds and is skipped once it
+  -- fails. "<N" shows while you have fewer than N (skip once you've collected enough);
+  -- ">N" shows while over N; bare "N" shows while you have at least N (e.g. equip steps).
   if step.itemcount then
     local c = 0
-    for k = 1, table.getn(step.itemcount.ids) do c = c + ((GetItemCount and GetItemCount(step.itemcount.ids[k])) or 0) end
+    for k = 1, table.getn(step.itemcount.ids) do
+      local id = step.itemcount.ids[k]
+      local n = (GetItemCount and GetItemCount(id)) or 0
+      if n == 0 and GetInventoryItemID then                 -- GetItemCount excludes equipped items on 1.12
+        for slot = 1, 19 do if GetInventoryItemID("player", slot) == id then n = 1; break end end
+      end
+      c = c + n
+    end
     local op, tot = step.itemcount.op, step.itemcount.total
-    if (op == "<" and c < tot) or (op == ">" and c > tot) or (op == "" and c == tot) then return false end
+    local show = (op == "<" and c < tot) or (op == ">" and c > tot) or (op == "" and c >= tot)
+    if not show then return false end
   end
-  -- .money: show only while gold is under/over the amount
+  -- .money: per RXP (functions.money), ".money <X" completes/skips the step while gold < X
+  -- (can't afford it yet) and shows it once gold >= X; ">X" is the mirror. Show only when met.
   if step.money then
     local gold = ((GetMoney and GetMoney()) or 0) / 10000
-    local show; if step.money.gt then show = gold > step.money.amount else show = gold < step.money.amount end
+    local show; if step.money.gt then show = gold < step.money.amount else show = gold >= step.money.amount end
     if not show then return false end
   end
   -- .itemStat: show while the equipped item's QUALITY/LEVEL meets the test (other stats not readable on 1.12 -> fail open)
@@ -1375,13 +1656,38 @@ function Guided.StepGateMet(step, log)
   return true
 end
 
+-- has this sticky side-step been manually skipped by the player? (per guide, by gindex,
+-- persisted -- so ticking a side quest to dismiss it stays dismissed and doesn't re-pin.)
+local function StickySkipped(s)
+  return s and s.gindex and Guided_Save.stickySkip and Guided_Save.guide
+     and Guided_Save.stickySkip[Guided_Save.guide]
+     and Guided_Save.stickySkip[Guided_Save.guide][s.gindex] or false
+end
+
+-- manually skip a sticky side-step: unpin it and remember, WITHOUT touching the main
+-- step pointer. (Ticking a sticky used to call Advance(), which skipped the main step.)
+function Guided.SkipSticky(step)
+  if not step then return end
+  Guided.activeStickies = Guided.activeStickies or {}
+  for i = 1, table.getn(Guided.active or {}) do
+    if Guided.active[i] == step then Guided.activeStickies[i] = nil; break end
+  end
+  if step.gindex and Guided_Save.guide then
+    Guided_Save.stickySkip = Guided_Save.stickySkip or {}
+    Guided_Save.stickySkip[Guided_Save.guide] = Guided_Save.stickySkip[Guided_Save.guide] or {}
+    Guided_Save.stickySkip[Guided_Save.guide][step.gindex] = true
+  end
+  Guided.UpdateUI()
+end
+
 -- a pinned sticky should drop once it's done OR the current step has advanced past
 -- the step it completes with (its window closed). Without this an orphaned side-step
 -- lingers while you're already several steps ahead (e.g. after abandoning a quest).
 function Guided.StickyShouldPin(idx, log)
-  if Guided.StepDoneByIndex(idx, log) then return false end
   local s = Guided.active and Guided.active[idx]
   if not s then return false end
+  if StickySkipped(s) then return false end                  -- manually dismissed
+  if Guided.StepDoneByIndex(idx, log) then return false end
   if s.completewith and s.completewith ~= true then
     local t = (s.completewith == "next") and (idx + 1)
               or (Guided.labelIndex and Guided.labelIndex[s.completewith])
@@ -1488,21 +1794,30 @@ end
 function Guided.WantedQuests()
   local accept, turnin = {}, {}
   if not Guided.active then return accept, turnin end
-  local cur = Guided_Save.step or 1
-  local idxs = {}
-  for d = 0, 5 do idxs[cur + d] = true end          -- current + small lookahead (NPC chains)
-  if Guided.activeStickies then
-    for k in pairs(Guided.activeStickies) do idxs[k] = true end
-  end
-  for i in pairs(idxs) do
+  -- Scan the WHOLE active guide, not a step window: a quest hub can hand in / hand out
+  -- several quests that live many steps apart, and we want auto mode to clear them ALL in
+  -- one visit (each GOSSIP_SHOW/QUEST_GREETING re-fires after an action, so the handler
+  -- picks the next). Turn-ins are unconditionally wanted -- the NPC only offers quests you
+  -- actually hold, and the handler still gates on completeness. Accepts are gated on "you
+  -- don't already hold it and haven't turned it in" so we never re-grab a done/held quest.
+  local log = Guided.BuildQuestLog and Guided.BuildQuestLog()
+  local n = table.getn(Guided.active)
+  for i = 1, n do
     local s = Guided.active[i]
-    if s and s.quests then
-      for k = 1, table.getn(s.quests) do
-        local q = s.quests[k]
-        local nm = CondOK(q.cond) and QuestName(q.id)
+    local qs = s and s.quests
+    if qs then
+      for k = 1, table.getn(qs) do
+        local q = qs[k]
+        local nm = q.id and CondOK(q.cond) and QuestName(q.id)
         if nm then
-          if q.action == "accept" then accept[lc(nm)] = true
-          elseif q.action == "turnin" then turnin[lc(nm)] = true end
+          local key = lc(nm)
+          if q.action == "turnin" then
+            turnin[key] = true
+          elseif q.action == "accept" then
+            local have = log and log[key]
+            local done = Guided_Save.doneQuests and Guided_Save.doneQuests[q.id]
+            if not have and not done then accept[key] = true end
+          end
         end
       end
     end
@@ -1533,14 +1848,39 @@ function Guided.RecordTurnin(title)
   if not title or title == "" or not Guided.active then return end
   title = lc(title)
   Guided_Save.doneQuests = Guided_Save.doneQuests or {}
+  -- Same-named quests (e.g. 456 & 457 are BOTH "The Balance of Nature") share a
+  -- title, and 1.12 gives no quest id in the log to tell them apart. Marking every
+  -- turn-in step with this title done would wrongly complete the LATER quest the
+  -- instant you hand in the earlier one (its kill/turn-in steps then get skipped).
+  -- The guide is linear, so record only the EARLIEST active turn-in for this title
+  -- we haven't recorded yet -- i.e. the one you're actually handing in right now.
+  local bestI, bestId
   for i = 1, table.getn(Guided.active) do
     local qs = Guided.active[i].quests
     if qs then
       for k = 1, table.getn(qs) do
         local q = qs[k]
-        if q.action == "turnin" and q.id and lc(QuestName(q.id) or "") == title then
-          Guided_Save.doneQuests[q.id] = true
+        if q.action == "turnin" and q.id and CondOK(q.cond)
+           and lc(QuestName(q.id) or "") == title
+           and not Guided_Save.doneQuests[q.id] then
+          if not bestI or i < bestI then bestI, bestId = i, q.id end   -- skip class/faction-disabled lines (CondOK)
         end
+      end
+    end
+  end
+  if bestId then Guided_Save.doneQuests[bestId] = true end
+end
+
+-- clear the current guide's turned-in-quest records. Reset drives skipping off
+-- doneQuests (NOT the dead `done` table), so a reset must clear these or SetStep(1)
+-- walks straight back to where you were (every turned-in step still reads "done").
+function Guided.ClearGuideDoneQuests()
+  if not Guided.active or not Guided_Save.doneQuests then return end
+  for i = 1, table.getn(Guided.active) do
+    local qs = Guided.active[i].quests
+    if qs then
+      for k = 1, table.getn(qs) do
+        if qs[k].id then Guided_Save.doneQuests[qs[k].id] = nil end
       end
     end
   end
@@ -1572,10 +1912,14 @@ function Guided.HandleQuestEvent(e)
     end
 
   elseif e == "QUEST_GREETING" then
-    -- multi-quest greeting panel: clean per-index title API, no stride needed
+    -- multi-quest greeting panel: clean per-index title API, no stride needed.
+    -- Only select an active quest if it's actually COMPLETE -- selecting an unfinished
+    -- turn-in opens its "not done yet" dialog and blocks accepting the other quests here.
+    -- Completeness comes from a full-log scan (NameComplete) because the 1.12 greeting API
+    -- gives no per-slot isComplete and the name-keyed log collapses same-name twins.
     for i = 1, GetNumActiveQuests() do
       local t = GetActiveTitle(i)
-      if t and turnin[lc(t)] then SelectActiveQuest(i); return end
+      if t and turnin[lc(t)] and NameComplete(lc(t)) then SelectActiveQuest(i); return end
     end
     for i = 1, GetNumAvailableQuests() do
       local t = GetAvailableTitle(i)
@@ -1585,7 +1929,7 @@ function Guided.HandleQuestEvent(e)
   elseif e == "GOSSIP_SHOW" then
     local act = GossipQuestList(GetGossipActiveQuests)
     for i = 1, table.getn(act) do
-      if turnin[lc(act[i])] then SelectGossipActiveQuest(i); return end
+      if turnin[lc(act[i])] and NameComplete(lc(act[i])) then SelectGossipActiveQuest(i); return end
     end
     local av = GossipQuestList(GetGossipAvailableQuests)
     for i = 1, table.getn(av) do
@@ -2040,6 +2384,7 @@ local function RenderRow(r, step, i, cur, expand)
     end
     local stepTurnin = false
     for j = 1, nEls do if els[j].kind == "turnin" then stepTurnin = true; break end end
+    local elog = Guided.BuildQuestLog and Guided.BuildQuestLog()
     local vis = 0
     for j = 1, nEls do
       local el = els[j]
@@ -2054,6 +2399,29 @@ local function RenderRow(r, step, i, cur, expand)
           local ot, od, ty = ObjectiveText(el.id, el.obj)            -- "Young Nightsaber slain: 0/5"
           txt = ot or ElementLineWithCount(el); otype = ty
           if od ~= nil then el.checked = od and true or false end     -- radio auto-tracks the kill
+        elseif el.kind == "accept" and el.id then
+          txt = ElementLine(el)
+          local nm = QuestName(el.id)
+          if nm and elog then
+            local key = lc(nm)
+            local checked = elog[key] ~= nil                            -- quest of this name is in your log
+            if checked and step.quests then
+              -- same-name guard: if this step ALSO turns in a same-named quest that isn't
+              -- handed in yet (e.g. turn in 456 + accept 457, both "The Balance of Nature"),
+              -- the quest in your log is that turn-in -- don't tick the accept prematurely.
+              for k = 1, table.getn(step.quests) do
+                local qq = step.quests[k]
+                if qq.action == "turnin" and qq.id and lc(QuestName(qq.id) or "") == key
+                   and not (Guided_Save.doneQuests and Guided_Save.doneQuests[qq.id]) then
+                  checked = false; break
+                end
+              end
+            end
+            el.checked = checked
+          end
+        elseif el.kind == "turnin" and el.id then
+          txt = ElementLine(el)
+          if Guided_Save.doneQuests and Guided_Save.doneQuests[el.id] then el.checked = true end  -- ticks once handed in
         else
           txt = ElementLine(el)
         end
@@ -2093,7 +2461,9 @@ local function RenderRow(r, step, i, cur, expand)
     else
       r.bar:Hide()
     end
-    -- auto-advance when every APPLICABLE element is ticked
+    -- ticking every applicable element: a STICKY side-step is dismissed on its own
+    -- (unpinned), a main step advances the guide. (Previously both called Advance(),
+    -- so ticking a side quest skipped the MAIN step.)
     r.onToggle = function()
       local n = 0
       for k = 1, table.getn(step.elements or {}) do
@@ -2103,7 +2473,9 @@ local function RenderRow(r, step, i, cur, expand)
           if not el.checked then return end
         end
       end
-      if n > 0 then Guided.Advance() end
+      if n > 0 then
+        if step.sticky then Guided.SkipSticky(step) else Guided.Advance() end
+      end
     end
     -- Target / Use action buttons (side by side, one row)
     local hasT = step.targets and table.getn(step.targets) > 0
@@ -2277,7 +2649,7 @@ function Guided.UpdateUI()
     Guided.SetWaypoint(nil)
     return
   end
-  getglobal("GuidedFrameTitle"):SetText(g.name)
+  getglobal("GuidedFrameTitle"):SetText(Guided.DisplayName(g))
   local n = table.getn(Guided.active)
   local cur = Guided_Save.step or 1
   getglobal("GuidedFrameCounter"):SetText((Guided.dispNum and Guided.dispNum[cur] or cur).." / "..(Guided.numMain or n))
@@ -2297,7 +2669,7 @@ function Guided.UpdateUI()
     local st = Guided.active[i]
     local r = GetRow(i)
     local doneHidden = Guided_Save.hidedone and i < cur and not (Guided.activeStickies and Guided.activeStickies[i])
-    if doneHidden or (st.xpGate and st.xpGate.skip and Guided.XpGateMet(st.xpGate)) then
+    if doneHidden or (st.xpGate and st.xpGate.skip and (st.xpGate.reverse or Guided_Save.skipoverlevel ~= false) and Guided.XpGateMet(st.xpGate)) then
       r:Hide(); Guided.rowY[i] = y          -- completed (when "hide completed") or inapplicable gate
     else
       local h = RenderRow(r, st, i, cur, false)
@@ -2379,6 +2751,22 @@ function Guided.GuideSubgroup(g)
     end
   end
   return nil
+end
+
+-- the name shown to the player: a #displayname whose "<<" condition matches this
+-- character (first match wins), else the guide's #name. Lets one guide present as
+-- e.g. "11-16 Darkshore" for a Night Elf and "15-16 Darkshore" for everyone else.
+-- The #name stays the canonical id used for chaining/saving, so only display changes.
+function Guided.DisplayName(g)
+  if type(g) == "string" then g = Guided.guides[g] end
+  if not g then return "" end
+  if g.displaynames then
+    for i = 1, table.getn(g.displaynames) do
+      local d = g.displaynames[i]
+      if (not d.cond) or Guided.EvalCondition(d.cond) then return d.text end
+    end
+  end
+  return g.name
 end
 
 -- a guide is visible if it has no faction or matches the player's
@@ -2488,7 +2876,7 @@ function Guided.MenuInit()
       local loose = Guided.GuidesInGroup(grp, false)
       for ni = 1, table.getn(loose) do
         local gname = loose[ni]
-        info = {}; info.text = gname; info.checked = (Guided_Save.guide == gname)
+        info = {}; info.text = Guided.DisplayName(gname); info.checked = (Guided_Save.guide == gname)
         info.func = function() Guided.LoadGuideByName(gname); CloseDropDownMenus() end
         UIDropDownMenu_AddButton(info, 2)
       end
@@ -2496,7 +2884,7 @@ function Guided.MenuInit()
       local names = Guided.GuidesInGroup(grp)
       for ni = 1, table.getn(names) do
         local gname = names[ni]
-        info = {}; info.text = gname; info.checked = (Guided_Save.guide == gname)
+        info = {}; info.text = Guided.DisplayName(gname); info.checked = (Guided_Save.guide == gname)
         info.func = function() Guided.LoadGuideByName(gname); CloseDropDownMenus() end
         UIDropDownMenu_AddButton(info, 2)
       end
@@ -2506,7 +2894,7 @@ function Guided.MenuInit()
     local names = Guided.GuidesInGroup(grp, sub)
     for ni = 1, table.getn(names) do
       local gname = names[ni]
-      info = {}; info.text = gname; info.checked = (Guided_Save.guide == gname)
+      info = {}; info.text = Guided.DisplayName(gname); info.checked = (Guided_Save.guide == gname)
       info.func = function() Guided.LoadGuideByName(gname); CloseDropDownMenus() end
       UIDropDownMenu_AddButton(info, 3)
     end
@@ -3074,6 +3462,8 @@ local function CreateOptions()
   rstb:SetScript("OnClick", function()
     Guided.seen = {}; Guided.activeStickies = {}
     if Guided_Save.done then Guided_Save.done[Guided_Save.guide] = nil end
+    if Guided_Save.stickySkip then Guided_Save.stickySkip[Guided_Save.guide] = nil end
+    Guided.ClearGuideDoneQuests()
     Guided.SetStep(1); Print("Reset to step 1.")
   end)
 
@@ -3160,6 +3550,9 @@ local function Defaults()
   if Guided_Save.dungeons == nil then Guided_Save.dungeons = {} end
   if Guided_Save.done == nil then Guided_Save.done = {} end   -- legacy (unused)
   if Guided_Save.doneQuests == nil then Guided_Save.doneQuests = {} end  -- [questId]=true: observed hand-ins
+  if not Guided_Save.dqResetV1 then Guided_Save.doneQuests = {}; Guided_Save.dqResetV1 = true end  -- one-time wipe of same-name-collision corruption from the old RecordTurnin broadcast; the fixed logic rebuilds it live
+  if Guided_Save.stickySkip == nil then Guided_Save.stickySkip = {} end  -- [guide][gindex]=true: manually dismissed sticky side-steps
+  if Guided_Save.questlogicons == nil then Guided_Save.questlogicons = true end  -- mark guide quests in the Blizzard quest log
   if Guided_Save.minimap == nil then Guided_Save.minimap = true end
   if Guided_Save.minimappins == nil then Guided_Save.minimappins = true end
   if Guided_Save.mappins == nil then Guided_Save.mappins = true end
@@ -3223,6 +3616,89 @@ local function SelectDefaultGuide()
   end
 end
 
+-- ------------------------------------------------- quest-log markers ----
+-- Mark which entries in the Blizzard quest log belong to the current guide, and on
+-- hover show where the guide picks the quest up / turns it in (like RXP's quest-log
+-- tooltip). 1.12 exposes no quest ids in the log, so we match the entry title against
+-- the guide's quest maps (Guided.guideQuestNames / questPickup / questTurnin).
+-- Mirrors pfQuest's idiom: save+chain QuestLog_Update, iterate QUESTS_DISPLAYED title
+-- buttons offset by the faux-scroll, GetQuestLogTitle(display) per row.
+local QL_ICON = "Interface\\Icons\\INV_Gizmo_GoblinBoomBox_01"   -- same as the minimap button = recognizable Guided mark
+
+-- hover tooltip for a quest-log row: says whether THIS guide accepts/turns in the
+-- quest (with the step numbers), or that it's not part of the guide (orphaned).
+function Guided.QuestLogTooltip(btn)
+  if not (btn and btn.guidedQuest) then return end
+  if Guided_Save and Guided_Save.questlogicons == false then return end
+  local nm = btn.guidedQuest
+  local pu = Guided.questPickup and Guided.questPickup[nm]
+  local ti = Guided.questTurnin and Guided.questTurnin[nm]
+  GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
+  GameTooltip:ClearLines()
+  GameTooltip:AddLine("Guided: "..(Guided_Save and Guided_Save.guide or "guide"), 1, 0.82, 0)
+  if pu or ti then
+    if pu then GameTooltip:AddLine("Picked up"..(type(pu) == "number" and (" \226\128\162 step "..pu) or ""), 0.4, 1, 0.4) end
+    if ti then GameTooltip:AddLine("Turned in"..(type(ti) == "number" and (" \226\128\162 step "..ti) or ""), 1, 0.82, 0) end
+  else
+    GameTooltip:AddLine("Not part of this guide", 0.7, 0.7, 0.7)
+  end
+  GameTooltip:Show()
+end
+
+-- attach the tooltip to a quest-log title button once, chaining its existing
+-- highlight OnEnter/OnLeave so we don't clobber Blizzard's behaviour.
+local function HookQuestLogTooltip(btn)
+  if btn.guidedTip then return end
+  btn.guidedTip = true
+  local oe, ol = btn:GetScript("OnEnter"), btn:GetScript("OnLeave")
+  btn:SetScript("OnEnter", function() if oe then oe() end; Guided.QuestLogTooltip(this) end)
+  btn:SetScript("OnLeave", function() if ol then ol() end; GameTooltip:Hide() end)
+end
+
+function Guided.UpdateQuestLogIcons()
+  Guided.qlIcons = Guided.qlIcons or {}
+  local shown = (Guided_Save and Guided_Save.questlogicons ~= false)
+  local total = GetNumQuestLogEntries and GetNumQuestLogEntries() or 0
+  local offset = (FauxScrollFrame_GetOffset and QuestLogListScrollFrame
+                  and FauxScrollFrame_GetOffset(QuestLogListScrollFrame)) or 0
+  for i = 1, (QUESTS_DISPLAYED or 6) do
+    local btn = getglobal("QuestLogTitle"..i)
+    if btn then
+      local ico = Guided.qlIcons[i]
+      if not ico then
+        ico = btn:CreateTexture(nil, "OVERLAY")
+        ico:SetWidth(12); ico:SetHeight(12)
+        ico:SetPoint("LEFT", btn, "LEFT", 1, 0)   -- left-margin marker; tweakable
+        ico:SetTexture(QL_ICON)
+        Guided.qlIcons[i] = ico
+        HookQuestLogTooltip(btn)
+      end
+      -- stash this row's quest name for the hover tooltip (nil for header/empty rows)
+      local qname, mark = nil, false
+      local display = i + offset
+      if display <= total then
+        local title, _, _, isHeader = GetQuestLogTitle(display)
+        if title and not isHeader then
+          qname = lc(title)
+          if shown and Guided.guideQuestNames and Guided.guideQuestNames[qname] then mark = true end
+        end
+      end
+      btn.guidedQuest = qname
+      if mark then ico:Show() else ico:Hide() end
+    end
+  end
+end
+
+function Guided.SetupQuestLogIcons()
+  if Guided.qlHooked or not QuestLog_Update then return end
+  Guided.qlHooked = true
+  local orig = QuestLog_Update
+  QuestLog_Update = function()
+    orig()
+    if Guided.UpdateQuestLogIcons then Guided.UpdateQuestLogIcons() end
+  end
+end
+
 -- ---------------------------------------------------------------- events ----
 local ev = CreateFrame("Frame", "GuidedEvents")
 ev:RegisterEvent("VARIABLES_LOADED")
@@ -3268,6 +3744,7 @@ local function OnEvent()
     CreateArrow()
     Guided.StartMinimapPins()
     Guided.UpdateMinimapButton()
+    Guided.SetupQuestLogIcons()   -- mark guide quests in the Blizzard quest log
     Guided.trk = { t0 = GetTime(), xp = 0, lastXP = UnitXP("player") or 0,
                   lastMax = UnitXPMax("player") or 1, lvlStart = GetTime() }
     Guided.ApplyTracker()
@@ -3334,11 +3811,6 @@ function AbandonQuest()
   if nm and nm ~= "" and Guided.active then
     local key = lc(nm)
     Guided.seen[key] = nil                                   -- so the vanish isn't a "hand-in"
-    if Guided_Save.doneQuests then
-      for id in pairs(Guided_Save.doneQuests) do
-        if lc(QuestName(id) or "") == key then Guided_Save.doneQuests[id] = nil end
-      end
-    end
     -- route back to where this quest is accepted. Two quests can share a name (e.g.
     -- the 456/457 "Balance of Nature" chain), so pick the LATEST accept of that name
     -- BEFORE the current step -- the one you most recently picked up -- and key the
@@ -3353,6 +3825,9 @@ function AbandonQuest()
         end
       end
     end
+    -- clear ONLY the abandoned quest's id from doneQuests -- NOT every same-name id, or a
+    -- legitimately turned-in sibling (456 while abandoning 457) gets un-recorded forever.
+    if bestId and Guided_Save.doneQuests then Guided_Save.doneQuests[bestId] = nil end
     if bestI then Guided_Save.step = bestI; Guided.justAbandonedId = bestId end
   end
   if origAbandonQuest then origAbandonQuest() end   -- QUEST_LOG_UPDATE then re-runs SkipForward with the quest gone
@@ -3368,8 +3843,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.29"
+Guided.VERSION = "1.30"
 Guided.changelog = {
+  { "1.30", "#displayname support (e.g. Darkshore shows as 11-16 for Night Elves)" },
   { "1.29", "This /guided changelog command + CHANGELOG.md" },
   { "1.28", ".home / .hs steps auto-advance (set hearth / hearth home)" },
   { "1.27", "Fix auto-advance on same-named accept + turn-in steps" },
@@ -3418,16 +3894,18 @@ SlashCmdList["GUIDED"] = function(msg)
     else
       Print("No guide matched your class/race/level.")
     end
-  elseif cmd == "reset" then Guided.seen = {}; Guided.activeStickies = {}; if Guided_Save.done then Guided_Save.done[Guided_Save.guide] = nil end; Guided.SetStep(1); Print("Reset to step 1.")
+  elseif cmd == "reset" then Guided.seen = {}; Guided.activeStickies = {}; if Guided_Save.done then Guided_Save.done[Guided_Save.guide] = nil end; if Guided_Save.stickySkip then Guided_Save.stickySkip[Guided_Save.guide] = nil end; Guided.ClearGuideDoneQuests(); Guided.SetStep(1); Print("Reset to step 1.")
   elseif cmd == "list" then
     Print("Guides ("..table.getn(Guided.guideOrder).."):")
     for i = 1, table.getn(Guided.guideOrder) do
-      DEFAULT_CHAT_FRAME:AddMessage("  "..i..". "..Guided.guideOrder[i])
+      DEFAULT_CHAT_FRAME:AddMessage("  "..i..". "..Guided.DisplayName(Guided.guideOrder[i]))
     end
   elseif cmd == "load" then
     local found
     for i = 1, table.getn(Guided.guideOrder) do
-      if string.find(string.lower(Guided.guideOrder[i]), arg, 1, true) then found = Guided.guideOrder[i]; break end
+      local gn = Guided.guideOrder[i]
+      if string.find(string.lower(gn), arg, 1, true)
+         or string.find(string.lower(Guided.DisplayName(gn)), arg, 1, true) then found = gn; break end
     end
     if found then
       Guided_Save.guide = found; Guided_Save.step = 1; Guided.seen = {}

@@ -326,7 +326,7 @@ function Guided.ParseLine(step, t)
   if disp == "" then disp = nil end
   if disp then tinsert(step.text, Sanitize(disp)) end
 
-  local kind, etext, eid, eobj, eauto = nil, disp, nil, nil, nil
+  local kind, etext, eid, eobj, eauto, emarker = nil, disp, nil, nil, nil, nil
 
   if pre == "" then
     if disp then kind = "note" end                       -- a plain ">>text" note
@@ -561,7 +561,7 @@ function Guided.ParseLine(step, t)
           -- doesn't render it) -- otherwise "Reach level N" repeats on every gated step.
           if not step.completewith then kind = "level"; etext = disp or ("Reach level "..(val or "?")) end
         elseif key == "optional" then
-          step.optional = true; kind = "note"; etext = "|cff888888(optional)|r"
+          step.optional = true; kind = "note"; etext = "|cff888888(optional)|r"; emarker = true
         elseif key == "completewith" then
           step.completewith = (val ~= "" and val) or true
           if not step.tip then step.sticky = true end   -- a #completewith step is a pinned side-step, not a main step (matches RXP)
@@ -576,7 +576,7 @@ function Guided.ParseLine(step, t)
   end
 
   if kind and etext and etext ~= "" then
-    tinsert(step.elements, { kind = kind, text = Sanitize(etext), id = eid, obj = eobj, cond = lineCond, auto = eauto })
+    tinsert(step.elements, { kind = kind, text = Sanitize(etext), id = eid, obj = eobj, cond = lineCond, auto = eauto, marker = emarker })
   end
 end
 
@@ -1500,6 +1500,22 @@ function Guided.IsStepDone(step, log)
     local g = step.xpGate
     if (not g.skip) or g.reverse or (Guided_Save.skipoverlevel ~= false) then return true end
   end
+  -- no real visible content for this character -- all elements filtered out by their <<
+  -- conditions (leaving at most the faint "(optional)" marker), or none at all. There's
+  -- nothing to show or do, so auto-advance -- RXP treats an element-less step as complete.
+  local hasVisible = false
+  if step.elements then
+    for j = 1, table.getn(step.elements) do
+      local e = step.elements[j]
+      if not e.marker and CondOK(e.cond) then hasVisible = true; break end
+    end
+  end
+  if not hasVisible then                                    -- also keep any step with an applicable quest objective
+    for k = 1, table.getn(step.quests) do
+      if CondOK(step.quests[k].cond) then hasVisible = true; break end
+    end
+  end
+  if not hasVisible then return true end
   if table.getn(step.quests) == 0 then return false end
   if not log then return false end
   local any = false
@@ -3887,8 +3903,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.38"
+Guided.VERSION = "1.39"
 Guided.changelog = {
+  { "1.39", "Auto-skip content-less steps (all content filtered) instead of showing a bare checkbox" },
   { "1.38", "Fix side-steps piling up: #completewith windows now close for filtered/dangling targets" },
   { "1.37", "Side-steps respect their gates now (fixes 'Abandon Bashal'Aran' always showing)" },
   { "1.36", "#completewith steps are pinned side-steps now (were wrongly shown as main)" },

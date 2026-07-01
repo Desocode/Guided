@@ -3,6 +3,13 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.39
+- Steps with no visible content for your character now auto-advance instead of showing as a
+  bare checkbox. If every line of a step is filtered out by its `<<` condition (leaving only the
+  faint "(optional)" marker) — or the step has no content at all — there's nothing to do, so the
+  guide skips it, matching RXP (an element-less step is treated as already complete). Steps that
+  still have a real instruction or an applicable quest objective are unaffected.
+
 ## 1.38
 - Fixed side-steps piling up (many showing at once). A `#completewith` side-step closes when
   the guide passes its target step, but our target lookup only covered *active* steps — so any

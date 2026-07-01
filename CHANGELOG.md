@@ -3,6 +3,11 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.34
+- Added `/guided why` — prints a per-objective status for the current step (accepted /
+  handed in / complete / not in the name DB / gated) so you can see exactly what's stopping
+  it from auto-advancing. Useful for "hand in then pick up at the same NPC" steps that stall.
+
 ## 1.33
 - **Reverted 1.32.** Auto-skipping optional steps was wrong: on relog it flowed past
   optional content you were still working on — e.g. an active-quest objective like the

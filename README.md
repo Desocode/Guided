@@ -51,4 +51,5 @@ AddOns**. No other addons required.
 - `/guided options` — settings · `/guided auto` — toggle quest automation
 - `/guided next` · `prev` · `reset` · `import` · `dungeons` · `tracker` · `minimap`
 - `/guided changelog` — recent changes (full history in [CHANGELOG.md](CHANGELOG.md))
+- `/guided why` — diagnose why the current step isn't auto-completing (per-objective status)
 - Right-click the minimap button (or the window cog) for the menu

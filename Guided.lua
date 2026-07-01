@@ -3848,8 +3848,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.33"
+Guided.VERSION = "1.34"
 Guided.changelog = {
+  { "1.34", "/guided why -- diagnose why the current step isn't auto-completing" },
   { "1.33", "Revert 1.32: optional steps no longer auto-skip (it blew past wanted content on relog)" },
   { "1.31", ".fly steps complete on arrival -- fixes guides not auto-chaining to the next zone" },
   { "1.30", "#displayname support (e.g. Darkshore shows as 11-16 for Night Elves)" },
@@ -3889,6 +3890,45 @@ SlashCmdList["GUIDED"] = function(msg)
     Guided_Save.auto = not Guided_Save.auto
     if GuidedOptAuto then GuidedOptAuto:SetChecked(Guided_Save.auto and true or false) end
     Print("Auto quest pickup/turn-in "..(Guided_Save.auto and "|cff66cc66ON|r" or "|cffff5555OFF|r"))
+  elseif cmd == "why" then
+    -- diagnose why the current step isn't auto-completing: per-objective live status
+    local i = Guided_Save.step or 1
+    local s = Guided.active and Guided.active[i]
+    if not s then Print("No current step loaded."); return end
+    local log = (Guided.BuildQuestLog and Guided.BuildQuestLog()) or {}
+    Print("Why step "..i.." isn't auto-completing:")
+    if s.optional then DEFAULT_CHAT_FRAME:AddMessage("  |cff888888#optional step|r") end
+    if not Guided.StepGateMet(s, log) then DEFAULT_CHAT_FRAME:AddMessage("  |cffffcc00gate not met -> this step is skipped, not shown|r") end
+    if s.homename then DEFAULT_CHAT_FRAME:AddMessage("  .home target='"..s.homename.."' bind='"..lc((GetBindLocation and GetBindLocation()) or "").."'") end
+    if s.fly then DEFAULT_CHAT_FRAME:AddMessage("  .fly dest='"..lc(s.fly).."' zone='"..lc((GetRealZoneText and GetRealZoneText()) or "").."'") end
+    if table.getn(s.quests) == 0 and not (s.homename or s.fly or s.zonegoal or s.level or s.xpGate) then
+      DEFAULT_CHAT_FRAME:AddMessage("  no trackable objective (manual step -- tick the radio to advance)")
+    end
+    for k = 1, table.getn(s.quests) do
+      local q = s.quests[k]
+      local nm = q.id and QuestName(q.id)
+      if not CondOK(q.cond) then
+        DEFAULT_CHAT_FRAME:AddMessage("  ."..q.action.." "..tostring(q.id).." |cff888888-- off (<< "..tostring(q.cond)..")|r")
+      elseif not nm then
+        DEFAULT_CHAT_FRAME:AddMessage("  ."..q.action.." "..tostring(q.id).." |cffff5555-- NOT IN DB, can't auto-track|r")
+      else
+        local key = lc(nm)
+        local entry = log[key]
+        local done = q.id and Guided_Save.doneQuests and Guided_Save.doneQuests[q.id]
+        local ok, note
+        if q.action == "accept" then
+          ok = entry and true or false; note = entry and "accepted" or "not in your log (accept it, or DB title differs from client)"
+        elseif q.action == "turnin" then
+          ok = ((Guided.seen[key] and not entry) or done) and true or false
+          note = ok and "handed in" or (entry and "still in log (not turned in yet)" or "not seen this session")
+        elseif q.action == "complete" then
+          if not entry then ok = false; note = "not accepted"
+          elseif q.obj then local od = ObjectiveDone(entry.idx, q.obj); ok = od and true or false; note = ok and "objective done" or "objective not done"
+          else ok = entry.complete and true or false; note = ok and "complete" or "not complete yet" end
+        else ok = true; note = "" end
+        DEFAULT_CHAT_FRAME:AddMessage("  ."..q.action.." "..q.id.." ["..nm.."] "..(ok and "|cff66cc66OK|r" or "|cffff5555BLOCKING|r").." -- "..note)
+      end
+    end
   elseif cmd == "debug" then
     Guided.debug = not Guided.debug
     Print("Debug "..(Guided.debug and "|cff66cc66ON|r -- talk to a quest NPC and watch chat" or "|cffff5555OFF|r"))

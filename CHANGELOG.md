@@ -3,6 +3,13 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.41
+- Map pin hover text now shows a step's real instruction instead of the faint "(optional)"
+  marker. `#optional` adds a marker element, and the pin summary was picking it (it comes
+  first) — so side-step pins read "(optional)" instead of e.g. "Return to Auberdine". The
+  summary now skips the marker. (RXP treats optional as a step flag, not an element, so its
+  pins always showed the real text.)
+
 ## 1.40
 - World-map and minimap pins now skip content-less steps too. The auto-skip test from 1.39 is
   shared with the pin logic, so a step whose content is entirely filtered out for your character

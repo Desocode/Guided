@@ -828,7 +828,8 @@ local function StepSummaryText(st)
   local t
   if st.elements then
     for k = 1, table.getn(st.elements) do
-      if st.elements[k].text and st.elements[k].text ~= "" then t = st.elements[k].text; break end
+      local e = st.elements[k]
+      if not e.marker and e.text and e.text ~= "" then t = e.text; break end   -- skip the "(optional)" marker
     end
   end
   if not t and st.text then t = st.text[1] end
@@ -3912,8 +3913,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.40"
+Guided.VERSION = "1.41"
 Guided.changelog = {
+  { "1.41", "Map pin tooltips show the real step text, not the faint (optional) marker" },
   { "1.40", "Map & minimap no longer pin content-less steps (shared with the auto-skip logic)" },
   { "1.39", "Auto-skip content-less steps (all content filtered) instead of showing a bare checkbox" },
   { "1.38", "Fix side-steps piling up: #completewith windows now close for filtered/dangling targets" },

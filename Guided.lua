@@ -585,7 +585,7 @@ function Guided.ParseLine(step, t)
           -- doesn't render it) -- otherwise "Reach level N" repeats on every gated step.
           if not step.completewith then kind = "level"; etext = disp or ("Reach level "..(val or "?")) end
         elseif key == "optional" then
-          step.optional = true; kind = "note"; etext = "|cff888888(optional)|r"; emarker = true
+          step.optional = true    -- flag only: RXP renders NO "(optional)" label; it just hides optional steps from the upcoming list
         elseif key == "completewith" then
           step.completewith = (val ~= "" and val) or true
           if not step.tip then step.sticky = true end   -- a #completewith step is a pinned side-step, not a main step (matches RXP)
@@ -4006,8 +4006,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.50"
+Guided.VERSION = "1.51"
 Guided.changelog = {
+  { "1.51", "Drop the (optional) label -- RXP shows none; optional = hidden-from-preview only" },
   { "1.50", "#optional steps hidden from the upcoming list unless current/pinned (matches RXP)" },
   { "1.49", ".vendor/.train steps auto-complete when you visit that merchant/trainer" },
   { "1.48", "Multi-quest NPCs: close the quest frame after accept/turn-in so the dialogue re-opens for the next" },

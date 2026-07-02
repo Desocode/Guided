@@ -3,6 +3,12 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.51
+- Removed the faint "(optional)" label. RXP renders **no** optional marker on guide steps — it
+  conveys "optional" purely by hiding the step from the upcoming list (which we now do, 1.50).
+  Our label was the divergence and the source of the earlier "(optional)-only checkbox" and
+  map-tooltip glitches. Optional steps now look like any other step when reached, unlabelled.
+
 ## 1.50
 - `#optional` steps are now hidden from the upcoming-steps list, shown only when they're the
   current step or a pinned side-step — matching RXP (which hides optional from its bottom frame).

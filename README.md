@@ -39,9 +39,16 @@ dependencies.
 
 ## Install
 
-Extract the `Guided` folder into `…\World of Warcraft\Interface\AddOns\`, then **restart** the client
-(new addon folders don't appear on `/reload`). At the character screen, enable **Load out of date
-AddOns**. No other addons required.
+1. Open the [**Releases**](https://github.com/Desocode/Guided/releases/latest) page and, under
+   **Assets**, download **`Guided.zip`**.
+   ⚠️ **Don't** use the green *Code → Download ZIP* button or the *Source code (zip)* link — those
+   give you a mis-named `Guided-main` folder that WoW won't load.
+2. Extract it into `…\World of Warcraft\Interface\AddOns\`. You should end up with
+   `…\Interface\AddOns\Guided\Guided.toc` (folder named exactly `Guided`).
+3. **Restart** the client — new addon folders don't appear on `/reload` — and at the character
+   screen enable **Load out of date AddOns**.
+
+No other addons required.
 
 ## Usage
 

@@ -1239,6 +1239,33 @@ function Guided.ArrowUpdate(elapsed)
 
   if Guided_Save and Guided_Save.arrow == false then model:Hide(); txt:SetText(""); return end
 
+  -- dead & released as a ghost: point to your corpse instead of the step (RXP does the same,
+  -- via C_DeathInfo on modern clients; 1.12 has the global GetCorpseMapPosition()).
+  if UnitIsGhost and UnitIsGhost("player") and GetCorpseMapPosition then
+    if WorldMapFrame and not WorldMapFrame:IsVisible() then SetMapToCurrentZone() end
+    local cx, cy = GetCorpseMapPosition()
+    local px, py = GetPlayerMapPosition("player")
+    if cx and cy and (cx > 0 or cy > 0) and px and (px > 0 or py > 0) then
+      local ddx, ddy = (cx - px) * 100, (cy - py) * 100
+      local w = ZONE_YARDS[GetRealZoneText() or ""] or 3500
+      local yx, yy = ddx / 100 * w, ddy / 100 * (w / 1.5)
+      local dist = math.sqrt(yx*yx + yy*yy)
+      local dir = atan2(ddx*1.5, -(ddy))
+      dir = dir > 0 and (math.pi*2) - dir or -dir
+      if dir < 0 then dir = dir + 360 end
+      local angle = math.rad(dir) - GetPlayerFacing()
+      local cell = mymod(math.floor(angle / (math.pi*2) * 108 + 0.5), 108)
+      local column, row = mymod(cell, 9), math.floor(cell / 9)
+      model:SetTexCoord((column*56)/512, ((column+1)*56)/512, (row*42)/512, ((row+1)*42)/512)
+      model:Show()
+      if dist < 15 then txt:SetText("|cff66cc66Your corpse|r")
+      else txt:SetText(string.format("|cffcccccc%d yds to corpse|r", dist)) end
+    else
+      model:Hide(); txt:SetText("|cffccccccRun to your corpse|r")   -- no usable corpse pos (other zone / spirit healer)
+    end
+    return
+  end
+
   local step = Guided.CurrentStep()
   local gs = Guided.ArrowGoto()
   if not gs then model:Hide(); txt:SetText(""); return end
@@ -4006,8 +4033,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.52"
+Guided.VERSION = "1.53"
 Guided.changelog = {
+  { "1.53", "Corpse arrow: when dead, the direction arrow points to your corpse" },
   { "1.52", "Auto no longer accepts/turns in optional-step quests (matches RXP -- they are yours to choose)" },
   { "1.51", "Drop the (optional) label -- RXP shows none; optional = hidden-from-preview only" },
   { "1.50", "#optional steps hidden from the upcoming list unless current/pinned (matches RXP)" },

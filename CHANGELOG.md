@@ -3,6 +3,12 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.53
+- When you're dead and released as a ghost, the direction arrow now points to **your corpse**
+  (with distance), instead of the current step — like RXP. It uses the vanilla
+  `GetCorpseMapPosition()`; if the corpse position isn't readable (different zone / spirit
+  healer) it shows a "Run to your corpse" hint. Reverts to the normal step arrow once you res.
+
 ## 1.52
 - Auto quest pickup/turn-in now **skips optional-step quests**, matching RXP (which never
   auto-accepts or auto-turns-in optional quests — they're the player's choice). Quests on

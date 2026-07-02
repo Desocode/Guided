@@ -3,6 +3,11 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.50
+- `#optional` steps are now hidden from the upcoming-steps list, shown only when they're the
+  current step or a pinned side-step — matching RXP (which hides optional from its bottom frame).
+  Cuts the clutter of optional side-content in the preview; nothing changes about the flow.
+
 ## 1.49
 - `.vendor` and `.train` steps now auto-complete when you **visit** that merchant/trainer (open
   then close the window), matching RXP — no more manually ticking "go to the vendor" steps.

@@ -2810,7 +2810,10 @@ function Guided.UpdateUI()
     local st = Guided.active[i]
     local r = GetRow(i)
     local doneHidden = Guided_Save.hidedone and i < cur and not (Guided.activeStickies and Guided.activeStickies[i])
-    if doneHidden or (st.xpGate and st.xpGate.skip and (st.xpGate.reverse or Guided_Save.skipoverlevel ~= false) and Guided.XpGateMet(st.xpGate)) then
+    -- #optional steps are hidden from the list unless they're the current step or a pinned
+    -- side-step (RXP hides optional from its upcoming-steps frame the same way)
+    local optHidden = st.optional and i ~= cur and not (Guided.activeStickies and Guided.activeStickies[i])
+    if doneHidden or optHidden or (st.xpGate and st.xpGate.skip and (st.xpGate.reverse or Guided_Save.skipoverlevel ~= false) and Guided.XpGateMet(st.xpGate)) then
       r:Hide(); Guided.rowY[i] = y          -- completed (when "hide completed") or inapplicable gate
     else
       local h = RenderRow(r, st, i, cur, false)
@@ -4003,8 +4006,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.49"
+Guided.VERSION = "1.50"
 Guided.changelog = {
+  { "1.50", "#optional steps hidden from the upcoming list unless current/pinned (matches RXP)" },
   { "1.49", ".vendor/.train steps auto-complete when you visit that merchant/trainer" },
   { "1.48", "Multi-quest NPCs: close the quest frame after accept/turn-in so the dialogue re-opens for the next" },
   { "1.47", "#completewith side-steps clear when their OWN objective is done (e.g. 6/6 fangs), not only at the target" },

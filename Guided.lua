@@ -1916,7 +1916,7 @@ function Guided.WantedQuests()
   for i = 1, n do
     local s = Guided.active[i]
     local qs = s and s.quests
-    if qs then
+    if qs and not s.optional then     -- RXP doesn't auto-accept/turn-in optional quests (flags%2) -- they're your call
       for k = 1, table.getn(qs) do
         local q = qs[k]
         local nm = q.id and CondOK(q.cond) and QuestName(q.id)
@@ -4006,8 +4006,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.51"
+Guided.VERSION = "1.52"
 Guided.changelog = {
+  { "1.52", "Auto no longer accepts/turns in optional-step quests (matches RXP -- they are yours to choose)" },
   { "1.51", "Drop the (optional) label -- RXP shows none; optional = hidden-from-preview only" },
   { "1.50", "#optional steps hidden from the upcoming list unless current/pinned (matches RXP)" },
   { "1.49", ".vendor/.train steps auto-complete when you visit that merchant/trainer" },

@@ -3,6 +3,12 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.52
+- Auto quest pickup/turn-in now **skips optional-step quests**, matching RXP (which never
+  auto-accepts or auto-turns-in optional quests — they're the player's choice). Quests on
+  required steps are auto-handled as before; a quest on an `#optional` step is left for you to
+  accept/turn in manually.
+
 ## 1.51
 - Removed the faint "(optional)" label. RXP renders **no** optional marker on guide steps — it
   conveys "optional" purely by hiding the step from the upcoming list (which we now do, 1.50).

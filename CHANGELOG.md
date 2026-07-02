@@ -3,6 +3,12 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.48
+- Multi-quest NPCs (accept/turn in several quests at one NPC) now flow automatically with auto
+  on. After each accept/turn-in we close the quest frame (`HideUIPanel`), which makes the NPC
+  re-show its gossip/greeting so the next quest is picked up — the same mechanism RXP uses. You
+  no longer have to re-click the NPC between quests.
+
 ## 1.47
 - `#completewith` side-steps now clear when their **own** objective completes, not only when
   the step they're tied to is reached. A "kill Moonstalker Runts for 6 Fangs" side-step

@@ -2009,7 +2009,10 @@ function Guided.HandleQuestEvent(e)
   end
 
   if e == "QUEST_DETAIL" then
-    if accept[lc(GetTitleText())] then AcceptQuest() end
+    if accept[lc(GetTitleText())] then
+      AcceptQuest()
+      if HideUIPanel and QuestFrame then HideUIPanel(QuestFrame) end   -- close so a multi-quest NPC re-shows its gossip for the next quest (RXP does this)
+    end
 
   elseif e == "QUEST_PROGRESS" then
     if turnin[lc(GetTitleText())] and IsQuestCompletable() then CompleteQuest() end
@@ -2017,6 +2020,7 @@ function Guided.HandleQuestEvent(e)
   elseif e == "QUEST_COMPLETE" then
     if turnin[lc(GetTitleText())] and GetNumQuestChoices() <= 1 then
       GetQuestReward(1)   -- 1 is safe for 0 or 1 reward; choices are left to you
+      if HideUIPanel and QuestFrame then HideUIPanel(QuestFrame) end   -- close so the NPC re-shows its gossip for the next quest
     end
 
   elseif e == "QUEST_GREETING" then
@@ -3973,8 +3977,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.47"
+Guided.VERSION = "1.48"
 Guided.changelog = {
+  { "1.48", "Multi-quest NPCs: close the quest frame after accept/turn-in so the dialogue re-opens for the next" },
   { "1.47", "#completewith side-steps clear when their OWN objective is done (e.g. 6/6 fangs), not only at the target" },
   { "1.46", "Complete a .complete step when the whole quest reads complete (flaky per-objective read)" },
   { "1.45", "Cross-zone direction arrow (points toward targets in other zones; bundled Astrolabe data)" },

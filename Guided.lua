@@ -408,8 +408,8 @@ function Guided.ParseLine(step, t)
         kind = "note"; etext = disp or "Abandon quest"
         local _, _, aid = string.find(rest or "", "(%d+)")          -- quest the guide tells you to abandon
         if aid then step.abandonIds = step.abandonIds or {}; tinsert(step.abandonIds, tonumber(aid)) end
-      elseif cmd == "vendor" or cmd == "buy" then kind = "vendor"; etext = disp or (rest ~= "" and rest) or "Vendor"
-      elseif cmd == "train" or cmd == "trainer" then kind = "train"; etext = disp or "Train your spells"
+      elseif cmd == "vendor" or cmd == "buy" then kind = "vendor"; etext = disp or (rest ~= "" and rest) or "Vendor"; step.vendor = true
+      elseif cmd == "train" or cmd == "trainer" then kind = "train"; etext = disp or "Train your spells"; step.train = true
       elseif cmd == "hearth" or cmd == "sethearth" or cmd == "home" or cmd == "hs" then
         kind = "hearth"; etext = disp or "Hearthstone"
         if cmd == "home" or cmd == "sethearth" then
@@ -1566,6 +1566,9 @@ function Guided.IsStepDone(step, log)
   end
   if step.collectItem and table.getn(step.quests) == 0 and GetItemCount   -- .collect: done once you hold enough of the item
      and GetItemCount(step.collectItem) >= (step.collectCount or 1) then return true end
+  if (step.vendor or step.train) and step.gindex and Guided_Save.visited   -- .vendor/.train: done once you've opened+closed that window
+     and Guided_Save.visited[Guided_Save.guide or ""]
+     and Guided_Save.visited[Guided_Save.guide or ""][step.gindex] then return true end
   if step.level and UnitLevel("player") >= step.level then return true end
   if step.xpGate and Guided.XpGateMet(step.xpGate) then
     -- plain grind (no skipstep) and reverse gates always complete at threshold; a forward
@@ -1992,6 +1995,25 @@ function Guided.ClearGuideDoneQuests()
       end
     end
   end
+end
+
+-- a .vendor / .train step completes when you open then close that NPC window (RXP does the
+-- same: it doesn't track WHAT you bought, just that you visited). We can't match the specific
+-- vendor NPC id on 1.12, so any merchant/trainer close while such a step is current or pinned
+-- marks it done. Persisted per guide+gindex so a pinned .vendor side-step stays cleared on reload.
+function Guided.HandleVendorClose(field)
+  if not Guided.active then return end
+  local g = Guided_Save.guide; if not g then return end
+  Guided_Save.visited = Guided_Save.visited or {}
+  Guided_Save.visited[g] = Guided_Save.visited[g] or {}
+  local marked = false
+  local function mark(i)
+    local s = Guided.active[i]
+    if s and s[field] and s.gindex then Guided_Save.visited[g][s.gindex] = true; marked = true end
+  end
+  mark(Guided_Save.step or 1)
+  if Guided.activeStickies then for i in pairs(Guided.activeStickies) do mark(i) end end
+  if marked and Guided.SkipForward then Guided.SkipForward() end
 end
 
 function Guided.HandleQuestEvent(e)
@@ -3835,6 +3857,8 @@ ev:RegisterEvent("QUEST_PROGRESS")
 ev:RegisterEvent("QUEST_COMPLETE")
 ev:RegisterEvent("QUEST_GREETING")
 ev:RegisterEvent("GOSSIP_SHOW")
+ev:RegisterEvent("MERCHANT_CLOSED")    -- .vendor step completes on visiting a merchant
+ev:RegisterEvent("TRAINER_CLOSED")     -- .train step completes on visiting a trainer
 ev:RegisterEvent("WORLD_MAP_UPDATE")   -- reposition the world-map pin as the map opens/pans/zooms
 ev:RegisterEvent("TAXIMAP_OPENED")     -- auto flight paths (gated on Guided_Save.auto)
 ev:RegisterEvent("QUEST_TIMER_UPDATE") -- surface game quest timers in the timer bar
@@ -3846,6 +3870,8 @@ local function OnEvent()
   if event == "BAG_UPDATE" or event == "PLAYER_MONEY" or event == "ZONE_CHANGED_NEW_AREA" then
     if Guided.SkipForward then Guided.SkipForward() end; return
   end
+  if event == "MERCHANT_CLOSED" then Guided.HandleVendorClose("vendor"); return end
+  if event == "TRAINER_CLOSED" then Guided.HandleVendorClose("train"); return end
   if event == "VARIABLES_LOADED" then
     Defaults()
   elseif event == "PLAYER_LOGIN" then
@@ -3977,8 +4003,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.48"
+Guided.VERSION = "1.49"
 Guided.changelog = {
+  { "1.49", ".vendor/.train steps auto-complete when you visit that merchant/trainer" },
   { "1.48", "Multi-quest NPCs: close the quest frame after accept/turn-in so the dialogue re-opens for the next" },
   { "1.47", "#completewith side-steps clear when their OWN objective is done (e.g. 6/6 fangs), not only at the target" },
   { "1.46", "Complete a .complete step when the whole quest reads complete (flaky per-objective read)" },
@@ -4084,7 +4111,7 @@ SlashCmdList["GUIDED"] = function(msg)
     else
       Print("No guide matched your class/race/level.")
     end
-  elseif cmd == "reset" then Guided.seen = {}; Guided.activeStickies = {}; if Guided_Save.done then Guided_Save.done[Guided_Save.guide] = nil end; if Guided_Save.stickySkip then Guided_Save.stickySkip[Guided_Save.guide] = nil end; Guided.ClearGuideDoneQuests(); Guided.SetStep(1); Print("Reset to step 1.")
+  elseif cmd == "reset" then Guided.seen = {}; Guided.activeStickies = {}; if Guided_Save.done then Guided_Save.done[Guided_Save.guide] = nil end; if Guided_Save.stickySkip then Guided_Save.stickySkip[Guided_Save.guide] = nil end; if Guided_Save.visited then Guided_Save.visited[Guided_Save.guide] = nil end; Guided.ClearGuideDoneQuests(); Guided.SetStep(1); Print("Reset to step 1.")
   elseif cmd == "list" then
     Print("Guides ("..table.getn(Guided.guideOrder).."):")
     for i = 1, table.getn(Guided.guideOrder) do

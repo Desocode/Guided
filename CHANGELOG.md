@@ -3,6 +3,13 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.49
+- `.vendor` and `.train` steps now auto-complete when you **visit** that merchant/trainer (open
+  then close the window), matching RXP — no more manually ticking "go to the vendor" steps.
+  (RXP doesn't track *what* you bought either; the visit is the completion. We can't match the
+  specific NPC on 1.12, so any merchant/trainer close while such a step is current or pinned
+  clears it.)
+
 ## 1.48
 - Multi-quest NPCs (accept/turn in several quests at one NPC) now flow automatically with auto
   on. After each accept/turn-in we close the quest frame (`HideUIPanel`), which makes the NPC

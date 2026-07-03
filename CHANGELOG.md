@@ -3,6 +3,30 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.54 — full-audit release
+**Fixes**
+- **Item tracking actually works now.** `GetItemCount` (and `GetInventoryItemID`) are TBC
+  APIs that don't exist on 1.12, so `.collect` auto-complete (1.43) and `.itemcount` gates
+  were silently dead — e.g. the Filled Cleansing Bowl step genuinely never auto-skipped.
+  Items are now counted with a self-contained bag scan (bags + equipped slots, by item ID).
+- **Direction arrow skew fixed.** A degrees/radians constant mixup skewed every *east-side*
+  bearing by ~6.3° (in-zone, cross-zone, and corpse arrows). Bearings are now exact.
+- **Cross-zone arrow now resolves all 46 zones.** 13 zones (Azshara, Orgrimmar, Un'Goro,
+  Elwynn, Stranglethorn, Stormwind, …) failed to match their world-position data
+  (abbreviated/typo'd Astrolabe keys) and fell back to the "> Zone" hint.
+- **Same-name chains:** the arrow / auto-fly hold no longer releases early when a same-named
+  quest twin leaves the log (the last name-keyed heuristic, now id-accurate like completion).
+- Options **"Reset progress" now also clears vendor/trainer visit state** (it had diverged
+  from `/guided reset`); both now share one code path.
+- `/guided load` with no name no longer silently loads the first guide and resets progress.
+- Closing another addon's right-click menu no longer resets that menu's scale.
+
+**UX / slash cleanup**
+- New **`/guided help`**; unknown commands now show help instead of silently toggling the window.
+- Removed redundant/unintuitive command aliases: `back`, `changes`, `cl`, `config`, `opt`,
+  `dungeons` (all reachable via the remaining commands or the options window).
+- **ESC closes the options window**; the opacity slider now live-updates the top step panel too.
+
 ## 1.53
 - When you're dead and released as a ghost, the direction arrow now points to **your corpse**
   (with distance), instead of the current step — like RXP. It uses the vanilla

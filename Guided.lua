@@ -140,6 +140,32 @@ end
 -- a per-line "<< cond" passes if absent, or its condition matches this character
 local function CondOK(c) return (not c) or Guided.EvalCondition(c) end
 
+-- item counting. 1.12 has NO GetItemCount global (TBC API) and NO GetInventoryItemID, so
+-- count by scanning bag slots (id parsed from the container item link) plus equipped slots --
+-- a collected-then-equipped item must still count (".collect 3027,1" Heavy Recurve Bow).
+local function ItemLinkId(link)
+  if not link then return nil end
+  local _, _, id = string.find(link, "item:(%d+)")
+  return tonumber(id)
+end
+local function BagItemCount(itemId)
+  if not itemId then return 0 end
+  local total = 0
+  for bag = 0, 4 do
+    local slots = GetContainerNumSlots(bag) or 0
+    for slot = 1, slots do
+      if ItemLinkId(GetContainerItemLink(bag, slot)) == itemId then
+        local _, count = GetContainerItemInfo(bag, slot)
+        total = total + (count or 1)
+      end
+    end
+  end
+  for slot = 1, 19 do
+    if ItemLinkId(GetInventoryItemLink("player", slot)) == itemId then total = total + 1 end
+  end
+  return total
+end
+
 -- does a step have any real, visible content for THIS character? False when every line is
 -- filtered out by its "<<" condition (leaving at most the faint "(optional)" marker) or the
 -- step is empty. Content-less steps are auto-advanced and not pinned on the map/minimap.
@@ -1121,8 +1147,18 @@ end
 -- Resolve a zone name (guide display name, or GetMapInfo map-file) to its ZonePos entry.
 -- ZonePos keys are Astrolabe map-file names (no spaces); a few differ from the display
 -- name, hence the alias table. Returns continent index (1/2) + {width,height,xOffset,yOffset}.
-local ZONE_ALIAS = { ["darnassus"]="Darnassis", ["the barrens"]="Barrens",
-  ["dustwallow marsh"]="Dustwallow", ["stormwind city"]="StormwindCity" }
+-- display name -> Astrolabe map-file key, for every zone whose key isn't just the name
+-- minus spaces (Astrolabe keys are abbreviated/typo'd: Aszhara, Ogrimmar, Hilsbrad, ...).
+-- Verified against Data/ZonePos.lua keys; a miss here = arrow falls back to the "> Zone" hint.
+local ZONE_ALIAS = {
+  ["darnassus"]="Darnassis", ["the barrens"]="Barrens", ["dustwallow marsh"]="Dustwallow",
+  ["azshara"]="Aszhara", ["orgrimmar"]="Ogrimmar", ["un'goro crater"]="UngoroCrater",
+  ["alterac mountains"]="Alterac", ["arathi highlands"]="Arathi", ["elwynn forest"]="Elwynn",
+  ["hillsbrad foothills"]="Hilsbrad", ["the hinterlands"]="Hinterlands",
+  ["redridge mountains"]="Redridge", ["silverpine forest"]="Silverpine",
+  ["stormwind city"]="Stormwind", ["stranglethorn vale"]="Stranglethorn",
+  ["tirisfal glades"]="Tirisfal",
+}
 local function ZonePosLookup(name)
   if not Guided_ZonePos or not name or name == "" then return nil end
   local nk = lc(ZONE_ALIAS[lc(name)] or string.gsub(name, "%s+", ""))   -- alias, else strip spaces
@@ -1149,7 +1185,7 @@ function Guided.CrossZoneDir(targetZone, tx, ty)
   local ddx = (tx/100 * tz.width + tz.xOffset) - (px * pz.width + pz.xOffset)      -- yards, east+
   local ddy = (ty/100 * tz.height + tz.yOffset) - (py * pz.height + pz.yOffset)    -- yards, south+
   local dir = atan2(ddx, -(ddy))                       -- same convention as in-zone arrow, no 1.5 (yards isotropic)
-  dir = dir > 0 and (math.pi*2) - dir or -dir
+  dir = dir > 0 and 360 - dir or -dir   -- atan2 on 1.12 returns DEGREES; was math.pi*2 (a ~6.3deg skew for east-side bearings)
   if dir < 0 then dir = dir + 360 end
   return dir, math.sqrt(ddx*ddx + ddy*ddy)
 end
@@ -1251,7 +1287,7 @@ function Guided.ArrowUpdate(elapsed)
       local yx, yy = ddx / 100 * w, ddy / 100 * (w / 1.5)
       local dist = math.sqrt(yx*yx + yy*yy)
       local dir = atan2(ddx*1.5, -(ddy))
-      dir = dir > 0 and (math.pi*2) - dir or -dir
+      dir = dir > 0 and 360 - dir or -dir   -- atan2 on 1.12 returns DEGREES; was math.pi*2 (a ~6.3deg skew for east-side bearings)
       if dir < 0 then dir = dir + 360 end
       local angle = math.rad(dir) - GetPlayerFacing()
       local cell = mymod(math.floor(angle / (math.pi*2) * 108 + 0.5), 108)
@@ -1290,7 +1326,7 @@ function Guided.ArrowUpdate(elapsed)
     local yx, yy = ddx / 100 * w, ddy / 100 * (w / 1.5)     -- maps are 1.5:1
     dist = math.sqrt(yx*yx + yy*yy)
     dir = atan2(ddx*1.5, -(ddy))
-    dir = dir > 0 and (math.pi*2) - dir or -dir
+    dir = dir > 0 and 360 - dir or -dir   -- atan2 on 1.12 returns DEGREES; was math.pi*2 (a ~6.3deg skew for east-side bearings)
     if dir < 0 then dir = dir + 360 end
   end
   local angle = math.rad(dir) - GetPlayerFacing()
@@ -1493,7 +1529,7 @@ local function ObjectiveDone(li, obj)
   local sel = GetQuestLogSelection()
   SelectQuestLogEntry(li)
   local txt, _, done = GetQuestLogLeaderBoard(obj)
-  if sel then SelectQuestLogEntry(sel) end
+  if sel and sel > 0 then SelectQuestLogEntry(sel) end
   local cur
   if txt then local _, _, c = string.find(txt, "(%d+)%s*/%s*%d+"); cur = tonumber(c) end
   return done, cur                              -- done flag, fulfilled count (the "x" of x/y)
@@ -1510,8 +1546,10 @@ function Guided.QuestSatisfied(q, log)
   if q.action == "accept" then
     return entry ~= nil
   elseif q.action == "turnin" then
-    if Guided_Save.doneQuests and Guided_Save.doneQuests[q.id] then return true end
-    return (Guided.seen[key] and not entry) and true or false
+    -- doneQuests[id] ONLY, like IsStepDone: a name-based "seen then gone" check over-fires
+    -- for same-name chains (Bashal'Aran 954-957), prematurely moving the arrow off the
+    -- turn-in NPC / releasing the auto-fly hold before the real hand-in
+    return (Guided_Save.doneQuests and Guided_Save.doneQuests[q.id]) and true or false
   elseif q.action == "complete" then
     if not entry then return false end
     if entry.complete then return true end                   -- whole quest complete -> every objective satisfied
@@ -1591,8 +1629,8 @@ function Guided.IsStepDone(step, log)
     if d ~= "" and (lc(GetRealZoneText() or "") == d or lc(GetZoneText() or "") == d
                     or lc(GetSubZoneText() or "") == d) then return true end
   end
-  if step.collectItem and table.getn(step.quests) == 0 and GetItemCount   -- .collect: done once you hold enough of the item
-     and GetItemCount(step.collectItem) >= (step.collectCount or 1) then return true end
+  if step.collectItem and table.getn(step.quests) == 0                    -- .collect: done once you hold enough of the item
+     and BagItemCount(step.collectItem) >= (step.collectCount or 1) then return true end
   if (step.vendor or step.train) and step.gindex and Guided_Save.visited   -- .vendor/.train: done once you've opened+closed that window
      and Guided_Save.visited[Guided_Save.guide or ""]
      and Guided_Save.visited[Guided_Save.guide or ""][step.gindex] then return true end
@@ -1751,12 +1789,7 @@ function Guided.StepGateMet(step, log)
   if step.itemcount then
     local c = 0
     for k = 1, table.getn(step.itemcount.ids) do
-      local id = step.itemcount.ids[k]
-      local n = (GetItemCount and GetItemCount(id)) or 0
-      if n == 0 and GetInventoryItemID then                 -- GetItemCount excludes equipped items on 1.12
-        for slot = 1, 19 do if GetInventoryItemID("player", slot) == id then n = 1; break end end
-      end
-      c = c + n
+      c = c + BagItemCount(step.itemcount.ids[k])           -- bags + equipped (see BagItemCount)
     end
     local op, tot = step.itemcount.op, step.itemcount.total
     local show = (op == "<" and c < tot) or (op == ">" and c > tot) or (op == "" and c >= tot)
@@ -1774,7 +1807,7 @@ function Guided.StepGateMet(step, log)
     local is, stat = step.itemstat, nil
     if is.stat == "QUALITY" then stat = GetInventoryItemQuality and GetInventoryItemQuality("player", is.slot)
     elseif is.stat == "LEVEL" then
-      local id = GetInventoryItemID and GetInventoryItemID("player", is.slot)
+      local id = ItemLinkId(GetInventoryItemLink and GetInventoryItemLink("player", is.slot))
       if id and GetItemInfo then local _, _, _, lvl = GetItemInfo(id); stat = lvl end
     end
     if stat ~= nil then
@@ -2131,7 +2164,7 @@ local function ObjectiveLines(step)
       end
     end
   end
-  if sel then SelectQuestLogEntry(sel) end
+  if sel and sel > 0 then SelectQuestLogEntry(sel) end
   return out
 end
 
@@ -2239,7 +2272,7 @@ local function ObjectiveText(qid, obj)
       break
     end
   end
-  if sel then SelectQuestLogEntry(sel) end
+  if sel and sel > 0 then SelectQuestLogEntry(sel) end
   return txt, done, otype
 end
 
@@ -2259,7 +2292,7 @@ local function ObjectiveCount(qid, obj)
       break
     end
   end
-  if sel then SelectQuestLogEntry(sel) end
+  if sel and sel > 0 then SelectQuestLogEntry(sel) end
   return cnt, done
 end
 
@@ -2360,7 +2393,7 @@ local function ObjectiveProgress(step)
       end
     end
   end
-  if sel then SelectQuestLogEntry(sel) end
+  if sel and sel > 0 then SelectQuestLogEntry(sel) end
   return done, total
 end
 
@@ -3077,14 +3110,18 @@ end
 function Guided.ScaleDropdown()
   if DropDownList1 then DropDownList1:SetScale(0.8) end
   if DropDownList2 then DropDownList2:SetScale(0.8) end
+  Guided.ddScaled = true
 end
 
--- we shrink the shared dropdown frame for our menu; restore it on close so other
--- addons'/Blizzard's right-click menus aren't left scaled down.
+-- we shrink the shared dropdown frame for our menu; restore it on close. Flag-gated so
+-- closing ANOTHER addon's menu doesn't stomp a deliberate non-1 scale of theirs.
 local origCloseDropDownMenus = CloseDropDownMenus
 function CloseDropDownMenus(level)
-  if DropDownList1 then DropDownList1:SetScale(1) end
-  if DropDownList2 then DropDownList2:SetScale(1) end
+  if Guided.ddScaled then
+    Guided.ddScaled = nil
+    if DropDownList1 then DropDownList1:SetScale(1) end
+    if DropDownList2 then DropDownList2:SetScale(1) end
+  end
   if origCloseDropDownMenus then return origCloseDropDownMenus(level) end
 end
 
@@ -3432,6 +3469,7 @@ local function CreateOptions()
   f:SetScript("OnDragStart", function() this:StartMoving() end)
   f:SetScript("OnDragStop", function() this:StopMovingOrSizing() end)
   f:SetFrameStrata("DIALOG")
+  tinsert(UISpecialFrames, "GuidedOptionsFrame")   -- ESC closes the options dialog
 
   local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   title:SetPoint("TOP", f, "TOP", 0, -11); title:SetText("Guided Options")
@@ -3532,6 +3570,7 @@ local function CreateOptions()
   op:SetScript("OnValueChanged", function()
     Guided_Save.opacity = this:GetValue()
     if GuidedFrame then GuidedFrame:SetBackdropColor(0.05, 0.05, 0.07, Guided_Save.opacity) end
+    if GuidedStepFrame then GuidedStepFrame:SetBackdropColor(0.05, 0.05, 0.07, Guided_Save.opacity) end   -- top step panel updates live too
   end)
 
   -- ---------- Routing ----------
@@ -3630,13 +3669,7 @@ local function CreateOptions()
   local rstb = CreateFrame("Button", "GuidedOptReset", pGu, "UIPanelButtonTemplate")
   rstb:SetWidth(120); rstb:SetHeight(22); rstb:SetPoint("BOTTOMRIGHT", pGu, "BOTTOMRIGHT", -2, 6)
   rstb:SetText("Reset progress")
-  rstb:SetScript("OnClick", function()
-    Guided.seen = {}; Guided.activeStickies = {}
-    if Guided_Save.done then Guided_Save.done[Guided_Save.guide] = nil end
-    if Guided_Save.stickySkip then Guided_Save.stickySkip[Guided_Save.guide] = nil end
-    Guided.ClearGuideDoneQuests()
-    Guided.SetStep(1); Print("Reset to step 1.")
-  end)
+  rstb:SetScript("OnClick", function() Guided.ResetProgress() end)
 
   f:Hide()
   Guided.OptTab("General")
@@ -3695,6 +3728,17 @@ end
 function Guided.ShowImport()
   Guided.ToggleOptions("Guides")
   if GuidedImportEdit then GuidedImportEdit:SetFocus() end
+end
+
+-- single reset path: the options "Reset progress" button and "/guided reset" previously
+-- duplicated this list and drifted (the button missed clearing .visited)
+function Guided.ResetProgress()
+  Guided.seen = {}; Guided.activeStickies = {}
+  if Guided_Save.done then Guided_Save.done[Guided_Save.guide] = nil end
+  if Guided_Save.stickySkip then Guided_Save.stickySkip[Guided_Save.guide] = nil end
+  if Guided_Save.visited then Guided_Save.visited[Guided_Save.guide] = nil end
+  Guided.ClearGuideDoneQuests()
+  Guided.SetStep(1); Print("Reset to step 1.")
 end
 
 function Guided.Show() if GuidedFrame then GuidedFrame:Show(); Guided_Save.shown = true end end
@@ -4033,8 +4077,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.53"
+Guided.VERSION = "1.54"
 Guided.changelog = {
+  { "1.54", "Audit: item tracking (.collect/.itemcount) actually works now; arrow skew fixed; /guided help + slash cleanup" },
   { "1.53", "Corpse arrow: when dead, the direction arrow points to your corpse" },
   { "1.52", "Auto no longer accepts/turns in optional-step quests (matches RXP -- they are yours to choose)" },
   { "1.51", "Drop the (optional) label -- RXP shows none; optional = hidden-from-preview only" },
@@ -4067,26 +4112,44 @@ Guided.changelog = {
 }
 
 -- ----------------------------------------------------------------- slash ----
+local function SlashHelp(unknown)
+  if unknown and unknown ~= "" then Print("Unknown command '"..unknown.."'. Commands:")
+  else Print("v"..Guided.VERSION.." -- commands:") end
+  local lines = {
+    "/guided |cff888888-- toggle the guide window|r",
+    "/guided options |cff888888-- settings (display, routing, dungeons, guides)|r",
+    "/guided list |cffffd200-|r load <name> |cffffd200-|r detect |cff888888-- pick a guide|r",
+    "/guided next |cffffd200-|r prev |cffffd200-|r reset |cff888888-- step navigation|r",
+    "/guided target |cffffd200-|r use |cff888888-- target step mob / use quest item (macro-able)|r",
+    "/guided auto |cff888888-- toggle quest auto accept/turn-in|r",
+    "/guided tracker |cffffd200-|r minimap |cff888888-- leveling tracker / minimap button|r",
+    "/guided import [clear] |cff888888-- import guides|r",
+    "/guided why |cffffd200-|r debug |cffffd200-|r changelog |cff888888-- diagnostics & info|r",
+  }
+  for i = 1, table.getn(lines) do DEFAULT_CHAT_FRAME:AddMessage("  "..lines[i]) end
+end
+
 SLASH_GUIDED1 = "/guided"
 SLASH_GUIDED2 = "/gd"
 SlashCmdList["GUIDED"] = function(msg)
   msg = trim(string.lower(msg or ""))
   local _, _, cmd, arg = string.find(msg, "^(%a*)%s*(.*)$")
-  if cmd == "next" then Guided.Advance()
-  elseif cmd == "prev" or cmd == "back" then Guided.Back()
+  if cmd == "" then Guided.Toggle()
+  elseif cmd == "help" then SlashHelp()
+  elseif cmd == "next" then Guided.Advance()
+  elseif cmd == "prev" then Guided.Back()
   elseif cmd == "target" then Guided.TargetStep()
   elseif cmd == "use" then Guided.UseStep()
   elseif cmd == "tracker" then Guided.ToggleTracker()
   elseif cmd == "minimap" then
     Guided_Save.minimap = (Guided_Save.minimap == false); Guided.UpdateMinimapButton()
     Print("Minimap button "..(Guided_Save.minimap ~= false and "shown" or "hidden"))
-  elseif cmd == "changelog" or cmd == "changes" or cmd == "cl" then
+  elseif cmd == "changelog" then
     Print("v"..Guided.VERSION.." -- recent changes (full history in CHANGELOG.md):")
     for i = 1, table.getn(Guided.changelog) do
       DEFAULT_CHAT_FRAME:AddMessage("  |cffffd200"..Guided.changelog[i][1].."|r  "..Guided.changelog[i][2])
     end
-  elseif cmd == "options" or cmd == "config" or cmd == "opt" then Guided.ToggleOptions()
-  elseif cmd == "dungeons" then Guided.ShowDungeons()
+  elseif cmd == "options" then Guided.ToggleOptions()
   elseif cmd == "import" then
     if arg == "clear" then Guided_Save.imports = {}; Print("Cleared imported guides -- /reload to apply.")
     else Guided.ShowImport() end
@@ -4145,13 +4208,14 @@ SlashCmdList["GUIDED"] = function(msg)
     else
       Print("No guide matched your class/race/level.")
     end
-  elseif cmd == "reset" then Guided.seen = {}; Guided.activeStickies = {}; if Guided_Save.done then Guided_Save.done[Guided_Save.guide] = nil end; if Guided_Save.stickySkip then Guided_Save.stickySkip[Guided_Save.guide] = nil end; if Guided_Save.visited then Guided_Save.visited[Guided_Save.guide] = nil end; Guided.ClearGuideDoneQuests(); Guided.SetStep(1); Print("Reset to step 1.")
+  elseif cmd == "reset" then Guided.ResetProgress()
   elseif cmd == "list" then
     Print("Guides ("..table.getn(Guided.guideOrder).."):")
     for i = 1, table.getn(Guided.guideOrder) do
       DEFAULT_CHAT_FRAME:AddMessage("  "..i..". "..Guided.DisplayName(Guided.guideOrder[i]))
     end
   elseif cmd == "load" then
+    if arg == "" then Print("Usage: /guided load <name>  (see /guided list)"); return end   -- empty pattern matches guide #1 and would reset progress
     local found
     for i = 1, table.getn(Guided.guideOrder) do
       local gn = Guided.guideOrder[i]
@@ -4166,6 +4230,6 @@ SlashCmdList["GUIDED"] = function(msg)
       Print("No guide matching '"..arg.."'. /guided list")
     end
   else
-    Guided.Toggle()
+    SlashHelp(cmd)   -- unknown command: show help instead of silently toggling the window
   end
 end

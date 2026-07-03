@@ -52,11 +52,10 @@ No other addons required.
 
 ## Usage
 
-- `/guided` (or `/gd`) — toggle the window
-- `/guided list` · `/guided load <name>` — browse / pick a guide
-- `/guided detect` — auto-pick a guide for your class/level
-- `/guided options` — settings · `/guided auto` — toggle quest automation
-- `/guided next` · `prev` · `reset` · `import` · `dungeons` · `tracker` · `minimap`
-- `/guided changelog` — recent changes (full history in [CHANGELOG.md](CHANGELOG.md))
+- `/guided` (or `/gd`) — toggle the window · `/guided help` — list all commands
+- `/guided list` · `/guided load <name>` · `/guided detect` — browse / pick a guide
+- `/guided options` — settings (display, routing, dungeons, import) · `/guided auto` — quest automation
+- `/guided next` · `prev` · `reset` — step navigation · `target` / `use` — macro-able actions
+- `/guided tracker` · `minimap` · `import [clear]` · `changelog`
 - `/guided why` — diagnose why the current step isn't auto-completing (per-objective status)
 - Right-click the minimap button (or the window cog) for the menu

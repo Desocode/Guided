@@ -3,6 +3,13 @@
 All notable changes to **Guided**, newest first. In-game, `/guided changelog`
 shows the most recent entries.
 
+## 1.55
+- Fixed the cog menu **growing when hovering over options**. The menu internals fire
+  `CloseDropDownMenus(level)` on every item hover (to close submenus), and our scale-restore
+  hook there reset the still-open menu from 0.8 to full size. The restore now runs on the
+  menu list's actual close (OnHide) instead — covering click-away, item click, ESC, and
+  another addon opening its menu — so the hover path never touches the scale.
+
 ## 1.54 — full-audit release
 **Fixes**
 - **Item tracking actually works now.** `GetItemCount` (and `GetInventoryItemID`) are TBC

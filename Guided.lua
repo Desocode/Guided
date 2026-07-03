@@ -3106,23 +3106,28 @@ function Guided.MenuInit()
 end
 
 -- the dropdown opens at full UI scale and looks oversized next to the ~0.8-scaled
--- guide window, so shrink it to match.
+-- guide window, so shrink it to match. Restore on the LIST's OnHide, NOT via a
+-- CloseDropDownMenus hook: the menu internals call CloseDropDownMenus(level) on every
+-- item HOVER (to close submenus), so a hook there reset the still-open menu to full
+-- size mid-hover (the "menu grows when hovering options" bug). DropDownList1 hiding is
+-- the one signal the menu is actually closed -- it covers click-away, item click, ESC,
+-- and another addon's menu opening.
 function Guided.ScaleDropdown()
   if DropDownList1 then DropDownList1:SetScale(0.8) end
   if DropDownList2 then DropDownList2:SetScale(0.8) end
   Guided.ddScaled = true
-end
-
--- we shrink the shared dropdown frame for our menu; restore it on close. Flag-gated so
--- closing ANOTHER addon's menu doesn't stomp a deliberate non-1 scale of theirs.
-local origCloseDropDownMenus = CloseDropDownMenus
-function CloseDropDownMenus(level)
-  if Guided.ddScaled then
-    Guided.ddScaled = nil
-    if DropDownList1 then DropDownList1:SetScale(1) end
-    if DropDownList2 then DropDownList2:SetScale(1) end
+  if DropDownList1 and not Guided.ddHideHooked then
+    Guided.ddHideHooked = true
+    local orig = DropDownList1:GetScript("OnHide")
+    DropDownList1:SetScript("OnHide", function()
+      if orig then orig() end
+      if Guided.ddScaled then                 -- flag-gated: don't stomp other addons' menu scale
+        Guided.ddScaled = nil
+        if DropDownList1 then DropDownList1:SetScale(1) end
+        if DropDownList2 then DropDownList2:SetScale(1) end
+      end
+    end)
   end
-  if origCloseDropDownMenus then return origCloseDropDownMenus(level) end
 end
 
 -- open the cog dropdown. A stepIndex (from a right-clicked row) adds a
@@ -4077,8 +4082,9 @@ function ConfirmBinder()
 end
 
 -- recent changes shown by "/guided changelog" (full history in CHANGELOG.md)
-Guided.VERSION = "1.54"
+Guided.VERSION = "1.55"
 Guided.changelog = {
+  { "1.55", "Fix: cog menu no longer grows when hovering options" },
   { "1.54", "Audit: item tracking (.collect/.itemcount) actually works now; arrow skew fixed; /guided help + slash cleanup" },
   { "1.53", "Corpse arrow: when dead, the direction arrow points to your corpse" },
   { "1.52", "Auto no longer accepts/turns in optional-step quests (matches RXP -- they are yours to choose)" },
